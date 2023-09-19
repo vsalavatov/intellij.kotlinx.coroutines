@@ -6,6 +6,8 @@ package kotlinx.coroutines.internal
 
 import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.debug.internal.*
+import kotlinx.coroutines.debug.internal.DispatchedCoroutinesDebugProbesImpl
 import kotlin.coroutines.*
 import kotlin.jvm.*
 
@@ -199,6 +201,7 @@ internal class DispatchedContinuation<in T>(
             resumeMode = MODE_ATOMIC
             dispatcher.dispatch(context, this)
         } else {
+            if (DISPATCHED_COROUTINES_TRACKING_ENABLED) DispatchedCoroutinesDebugProbesImpl.probeCoroutineResumed(this)
             executeUnconfined(state, MODE_ATOMIC) {
                 withCoroutineContext(this.context, countOrElement) {
                     continuation.resumeWith(result)
@@ -220,6 +223,7 @@ internal class DispatchedContinuation<in T>(
             resumeMode = MODE_CANCELLABLE
             dispatcher.dispatch(context, this)
         } else {
+            if (DISPATCHED_COROUTINES_TRACKING_ENABLED) DispatchedCoroutinesDebugProbesImpl.probeCoroutineResumed(this)
             executeUnconfined(state, MODE_CANCELLABLE) {
                 if (!resumeCancelled(state)) {
                     resumeUndispatchedWith(result)

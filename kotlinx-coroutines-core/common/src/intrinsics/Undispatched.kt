@@ -5,6 +5,8 @@
 package kotlinx.coroutines.intrinsics
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.debug.internal.DISPATCHED_COROUTINES_TRACKING_ENABLED
+import kotlinx.coroutines.debug.internal.DispatchedCoroutinesDebugProbesImpl
 import kotlinx.coroutines.internal.*
 import kotlin.coroutines.*
 import kotlin.coroutines.intrinsics.*
@@ -52,14 +54,21 @@ internal fun <R, T> (suspend (R) -> T).startCoroutineUndispatched(receiver: R, c
  * as the parameter of [block].
  */
 private inline fun <T> startDirect(completion: Continuation<T>, block: (Continuation<T>) -> Any?) {
-    val actualCompletion = probeCoroutineCreated(completion)
+    val actualCompletion = probeCoroutineCreated(completion).let { wrappedCompletion: Continuation<T> ->
+        if (DISPATCHED_COROUTINES_TRACKING_ENABLED && completion.context[ContinuationInterceptor] !== null)
+            DispatchedCoroutinesDebugProbesImpl.probeCoroutineCreated<T>(wrappedCompletion)
+        else
+            wrappedCompletion
+    }
     val value = try {
         block(actualCompletion)
     } catch (e: Throwable) {
+        if (DISPATCHED_COROUTINES_TRACKING_ENABLED) DispatchedCoroutinesDebugProbesImpl.probeCoroutineResumed(actualCompletion)
         actualCompletion.resumeWithException(e)
         return
     }
     if (value !== COROUTINE_SUSPENDED) {
+        if (DISPATCHED_COROUTINES_TRACKING_ENABLED) DispatchedCoroutinesDebugProbesImpl.probeCoroutineResumed(actualCompletion)
         @Suppress("UNCHECKED_CAST")
         actualCompletion.resume(value as T)
     }

@@ -4,6 +4,8 @@
 
 package kotlinx.coroutines
 
+import kotlinx.coroutines.debug.internal.*
+import kotlinx.coroutines.debug.internal.DispatchedCoroutinesDebugProbesImpl
 import kotlinx.coroutines.internal.*
 import kotlin.coroutines.*
 import kotlin.jvm.*
@@ -97,6 +99,8 @@ internal abstract class DispatchedTask<in T> internal constructor(
                  * will be silently lost.
                  */
                 val job = if (exception == null && resumeMode.isCancellableMode) context[Job] else null
+
+                if (DISPATCHED_COROUTINES_TRACKING_ENABLED) DispatchedCoroutinesDebugProbesImpl.probeCoroutineResumed(delegate)
                 if (job != null && !job.isActive) {
                     val cause = job.getCancellationException()
                     cancelCompletedResult(state, cause)

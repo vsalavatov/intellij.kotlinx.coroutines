@@ -5,6 +5,8 @@
 package kotlinx.coroutines
 
 import kotlinx.atomicfu.*
+import kotlinx.coroutines.debug.internal.*
+import kotlinx.coroutines.debug.internal.DispatchedCoroutinesDebugProbesImpl
 import kotlinx.coroutines.internal.*
 import kotlin.coroutines.*
 import kotlin.coroutines.intrinsics.*
@@ -318,6 +320,7 @@ internal open class CancellableContinuationImpl<in T>(
             if (isReusable) {
                 releaseClaimedReusableContinuation()
             }
+            if (DISPATCHED_COROUTINES_TRACKING_ENABLED) DispatchedCoroutinesDebugProbesImpl.probeCoroutineSuspended(delegate)
             return COROUTINE_SUSPENDED
         }
         // otherwise, onCompletionInternal was already invoked & invoked tryResume, and the result is in the state
