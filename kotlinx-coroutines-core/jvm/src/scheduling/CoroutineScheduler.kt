@@ -690,6 +690,56 @@ internal class CoroutineScheduler(
             return hadCpu
         }
 
+        /** only for [withoutCpuPermit] */
+        fun releaseCpu(): Boolean {
+            assert { state == WorkerState.CPU_ACQUIRED || state == WorkerState.BLOCKING }
+            return tryReleaseCpu(WorkerState.BLOCKING).also { released ->
+                if (released) {
+                    incrementBlockingTasks()
+                    signalCpuWork()
+                }
+            }
+        }
+
+        /** only for [withoutCpuPermit] */
+        fun reacquireCpu() {
+            assert { state == WorkerState.BLOCKING }
+            if (tryAcquireCpuPermit()) {
+                decrementBlockingTasks()
+                return
+            }
+            val permitTransfer = PermitTransfer()
+            scheduler.dispatch(permitTransfer.releaseFun {
+                // this code runs in a different worker thread that holds a CPU token
+                val cpuHolder = currentThread() as Worker
+                assert { cpuHolder.state == WorkerState.CPU_ACQUIRED }
+                val releasedTasks = cpuHolder.giveAwayLocalTasks()
+                if (releasedTasks) signalCpuWork()
+                cpuHolder.state = WorkerState.BLOCKING
+            }, taskContext = NonBlockingContext)
+            permitTransfer.acquire(
+                tryAllocatePermit = this@CoroutineScheduler::tryAcquireCpuPermit,
+                deallocatePermit = ::releaseCpuPermit
+            )
+            state = WorkerState.CPU_ACQUIRED
+            decrementBlockingTasks()
+        }
+
+        fun giveAwayLocalTasks(): Boolean {
+            // probably the right way would be to signalCpuWork() on each task, but it should be fine without it
+            var givenAwayAny: Boolean = false
+            stolenTask.element?.let { task ->
+                addToGlobalQueue(task)
+                stolenTask.element = null
+                givenAwayAny = true
+            }
+            while (true) {
+                val task = localQueue.poll() ?: return givenAwayAny
+                addToGlobalQueue(task)
+                givenAwayAny = true
+            }
+        }
+
         override fun run() = runWorker()
 
         @JvmField
@@ -787,7 +837,20 @@ internal class CoroutineScheduler(
              */
             while (inStack() && workerCtl.value == PARKED) { // Prevent spurious wakeups
                 if (isTerminated || state == WorkerState.TERMINATED) break
-                tryReleaseCpu(WorkerState.PARKING)
+                val hadCpu = tryReleaseCpu(WorkerState.PARKING)
+                if (hadCpu && !globalCpuQueue.isEmpty) {
+                    /*
+                     * Prevents the following race: consider corePoolSize = 1
+                     * - T_CPU holds the only CPU permit, scans the tasks, doesn't find anything, places itself on a stack
+                     * - T_CPU scans again, doesn't find anything again, suspends at tryPark()
+                     * - T_B (or several workers in BLOCKING mode) also put themselves on the stack, on top of the T_CPU
+                     * - T* (not a worker) dispatches CPU tasks, wakes up T_B
+                     * - T_B can't acquire a CPU permit, scans blocking queue, doesn't find anything, parks
+                     * - T_CPU releases the CPU permit, parks
+                     * - there are tasks in the CPU queue, but all workers are parked, so the scheduler won't make progress until there is another dispatch
+                     */
+                    break
+                }
                 interrupted() // Cleanup interruptions
                 park()
             }
@@ -795,13 +858,19 @@ internal class CoroutineScheduler(
 
         private fun inStack(): Boolean = nextParkedWorker !== NOT_IN_STACK
 
+        private var currentTask: Task? = null
+
         private fun executeTask(task: Task) {
             val taskMode = task.mode
             idleReset(taskMode)
             beforeTask(taskMode)
+            currentTask = task
             runSafely(task)
+            currentTask = null
             afterTask(taskMode)
         }
+
+        internal fun getCurrentTask(): Task? = currentTask
 
         private fun beforeTask(taskMode: Int) {
             if (taskMode == TASK_NON_BLOCKING) return
@@ -1039,3 +1108,38 @@ internal fun isSchedulerWorker(thread: Thread) = thread is CoroutineScheduler.Wo
 @JvmName("mayNotBlock")
 internal fun mayNotBlock(thread: Thread) = thread is CoroutineScheduler.Worker &&
     thread.state == CoroutineScheduler.WorkerState.CPU_ACQUIRED
+
+/**
+ * Emulates dispatch to [UnlimitedIoScheduler] in a blocking context.
+ */
+internal fun withUnlimitedIOScheduler(blocking: () -> Unit) {
+    val worker = Thread.currentThread() as? CoroutineScheduler.Worker
+        ?: return blocking()
+    with(worker) {
+        giveAwayLocalTasks()
+        withoutCpuPermit {
+            withTaskBlockingDispatch {
+                blocking()
+            }
+        }
+    }
+}
+
+private fun CoroutineScheduler.Worker.withoutCpuPermit(body: () -> Unit) {
+    val releasedPermit = releaseCpu()
+    try {
+        return body()
+    } finally {
+        if (releasedPermit) reacquireCpu()
+    }
+}
+
+private fun CoroutineScheduler.Worker.withTaskBlockingDispatch(body: () -> Unit) {
+    val dispatchAware = (getCurrentTask() as? TaskImpl)?.block as? BlockingDispatchAware ?: return body()
+    dispatchAware.beforeDispatchElsewhere()
+    try {
+        return body()
+    } finally {
+        dispatchAware.afterDispatchBack()
+    }
+}

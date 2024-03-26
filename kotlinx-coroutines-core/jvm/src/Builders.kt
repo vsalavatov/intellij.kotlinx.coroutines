@@ -4,6 +4,7 @@
 
 package kotlinx.coroutines
 
+import kotlinx.coroutines.scheduling.*
 import java.util.concurrent.locks.*
 import kotlin.contracts.*
 import kotlin.coroutines.*
@@ -95,7 +96,11 @@ private class BlockingCoroutine<T>(
                     val parkNanos = eventLoop?.processNextEvent() ?: Long.MAX_VALUE
                     // note: process next even may loose unpark flag, so check if completed before parking
                     if (isCompleted) break
-                    parkNanos(this, parkNanos)
+                    if (parkNanos > 0) {
+                        withUnlimitedIOScheduler {
+                            parkNanos(this, parkNanos)
+                        }
+                    }
                 }
             } finally { // paranoia
                 eventLoop?.decrementUseCount()
