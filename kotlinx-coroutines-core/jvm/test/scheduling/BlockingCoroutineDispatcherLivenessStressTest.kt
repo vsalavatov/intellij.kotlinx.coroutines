@@ -4,6 +4,7 @@ import kotlinx.coroutines.testing.*
 import kotlinx.coroutines.*
 import org.junit.*
 import org.junit.Test
+import java.util.concurrent.*
 import java.util.concurrent.atomic.*
 import kotlin.test.*
 
@@ -57,5 +58,32 @@ class BlockingCoroutineDispatcherLivenessStressTest : SchedulerTestBase() {
             tasks.forEach { it.await() }
         }
         assertEquals(2 * iterations, completed.get())
+    }
+}
+
+
+class BlockingCoroutineDispatcherTestCorePoolSize1 : SchedulerTestBase() {
+    init {
+        corePoolSize = 1
+    }
+
+    @Test
+    fun testLivenessOfDefaultDispatcher(): Unit = runBlocking { // (Dispatchers.Default)
+        repeat(1000 * stressTestMultiplier) {
+            System.err.println("======== $it")
+            val barrier = CyclicBarrier(2)
+            val barrier2 = CompletableDeferred<Unit>()
+            val jj = launch(dispatcher) {
+                barrier.await()
+                runBlocking {
+                    barrier2.await()
+                }
+            }
+            val task = async(dispatcher) { 42 }
+            barrier.await()
+            task.join()
+            barrier2.complete(Unit)
+            // jj.join()
+        }
     }
 }

@@ -4,6 +4,7 @@ import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.internal.*
 import java.io.*
+import java.lang.Thread.*
 import java.util.concurrent.*
 import java.util.concurrent.locks.*
 import kotlin.jvm.internal.Ref.ObjectRef
@@ -287,22 +288,35 @@ internal class CoroutineScheduler(
 
     private inline fun incrementBlockingTasks() = controlState.addAndGet(1L shl BLOCKING_SHIFT)
 
-    private inline fun decrementBlockingTasks() {
+    private inline fun decrementBlockingTasks() =
         controlState.addAndGet(-(1L shl BLOCKING_SHIFT))
-    }
+
+
+    private fun Long.asStateString(): String = "${createdWorkers(this)} created, ${blockingTasks(this)} blocking tasks, ${availableCpuPermits(this)} CPU permits available"
 
     private inline fun tryAcquireCpuPermit(): Boolean = controlState.loop { state ->
         val available = availableCpuPermits(state)
         if (available == 0) return false
         val update = state - (1L shl CPU_PERMITS_SHIFT)
-        if (controlState.compareAndSet(state, update)) return true
+        if (controlState.compareAndSet(state, update)) {
+            log("tryAcquireCpuPermit acquired: ${update.asStateString()}")
+            return true
+        }
     }
 
-    private inline fun releaseCpuPermit() = controlState.addAndGet(1L shl CPU_PERMITS_SHIFT)
+    private inline fun releaseCpuPermit() = controlState.addAndGet(1L shl CPU_PERMITS_SHIFT).also {
+        log("releaseCpuPermit: ${it.asStateString()}")
+    }
 
     // This is used a "stop signal" for close and shutdown functions
     private val _isTerminated = atomic(false)
     val isTerminated: Boolean get() = _isTerminated.value
+
+    public fun log(msg: String) {
+        if (currentThread().toString().contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")) return
+        val msgwide = if (msg.length < 70) msg + " ".repeat(70 - msg.length) else msg
+        System.err.println("${currentThread().name.substringBefore(" @")} ${(currentThread() as? Worker)?.state.toString().substring(0, 3)}| $msgwide | ${this@CoroutineScheduler}")
+    }
 
     companion object {
         // A symbol to mark workers that are not in parkedWorkersStack
@@ -434,9 +448,19 @@ internal class CoroutineScheduler(
     }
 
     fun signalCpuWork() {
-        if (tryUnpark()) return
-        if (tryCreateWorker()) return
-        tryUnpark()
+        if (tryUnpark()) {
+            log("signalCpu: unparked another worker")
+            return
+        }
+        if (tryCreateWorker()) {
+            log("signalCpu: created another worker")
+            return
+        }
+        if (tryUnpark()) {
+            log("signalCpu: unparked another worker 2")
+        } else {
+            log("signalCpu: failed to signal!!!")
+        }
     }
 
     private fun tryCreateWorker(state: Long = controlState.value): Boolean {
@@ -460,13 +484,17 @@ internal class CoroutineScheduler(
     private fun tryUnpark(): Boolean {
         while (true) {
             val worker = parkedWorkersStackPop() ?: return false
+            log("tryUnpark: popped ${worker.name} from stack")
             if (worker.workerCtl.compareAndSet(PARKED, CLAIMED)) {
+                log("tryUnpark: unparking ${worker.name}")
                 LockSupport.unpark(worker)
                 return true
+            } else {
+                log("tryUnpark: ${worker.name} is running (${worker.workerCtl.value == CLAIMED})")
             }
         }
     }
-
+    
     /**
      * Returns the number of CPU workers after this function (including new worker) or
      * 0 if no worker was created.
@@ -494,6 +522,7 @@ internal class CoroutineScheduler(
             worker = Worker(newIndex)
             workers.setSynchronized(newIndex, worker)
             require(newIndex == incrementCreatedWorkers())
+            log("spawned new worker $newIndex")
             cpuWorkers + 1
         }.also { worker.start() } // Start worker when the lock is released to reduce contention, see #3652
     }
@@ -693,31 +722,39 @@ internal class CoroutineScheduler(
         /** only for [withoutCpuPermit] */
         fun releaseCpu(): Boolean {
             assert { state == WorkerState.CPU_ACQUIRED || state == WorkerState.BLOCKING }
-            return tryReleaseCpu(WorkerState.BLOCKING).also { released ->
-                if (released) {
-                    val state = incrementBlockingTasks()
-                    signalBlockingWork(state, false)
-                }
+            if (state == WorkerState.CPU_ACQUIRED) {
+                val ib = incrementBlockingTasks(); log("releaseCpu: inc blocking; ${ib.asStateString()}")
+                tryReleaseCpu(WorkerState.BLOCKING); log("releaseCpu: release CPU")
+                signalCpuWork()
+                return true
             }
+            return false
         }
 
         /** only for [withoutCpuPermit] */
         fun reacquireCpu() {
             assert { state == WorkerState.BLOCKING }
-            decrementBlockingTasks()
-            if (tryAcquireCpuPermit()) return
+            if (tryAcquireCpuPermit()) {
+                log("reacquireCpu: acquired CPU fast")
+                val db = decrementBlockingTasks(); log("reacquireCpu: dec blocking ${db.asStateString()}")
+                return
+            }
             val permitTransfer = PermitTransfer()
             scheduler.dispatch(permitTransfer.releaseFun {
                 // this code runs in a different worker thread that holds a CPU token
                 val cpuHolder = currentThread() as Worker
                 assert { cpuHolder.state == WorkerState.CPU_ACQUIRED }
                 cpuHolder.state = WorkerState.BLOCKING
+                log("releasing CPU!")
             }, taskContext = NonBlockingContext)
+            log("reacquireCpu: releaseFun dispatched")
             permitTransfer.acquire(
                 tryAllocatePermit = this@CoroutineScheduler::tryAcquireCpuPermit,
                 deallocatePermit = ::releaseCpuPermit
             )
+            log("reacquireCpu: acquired CPU slow")
             state = WorkerState.CPU_ACQUIRED
+            val db2 = decrementBlockingTasks(); log("reacquireCpu: dec blocking slow ${db2.asStateString()}")
         }
 
         override fun run() = runWorker()
@@ -799,7 +836,9 @@ internal class CoroutineScheduler(
         // Counterpart to "tryUnpark"
         private fun tryPark() {
             if (!inStack()) {
-                parkedWorkersStackPush(this)
+                if (parkedWorkersStackPush(this)) {
+                    log("wasn't on stack, pushed on stack")
+                }
                 return
             }
             workerCtl.value = PARKED // Update value once
@@ -832,7 +871,9 @@ internal class CoroutineScheduler(
             idleReset(taskMode)
             beforeTask(taskMode)
             currentTask = task
+            log("executing task...")
             runSafely(task)
+            log("executed task")
             currentTask = null
             afterTask(taskMode)
         }
@@ -880,7 +921,9 @@ internal class CoroutineScheduler(
             // set termination deadline the first time we are here (it is reset in idleReset)
             if (terminationDeadline == 0L) terminationDeadline = System.nanoTime() + idleWorkerKeepAliveNs
             // actually park
+            log("scheduler park")
             LockSupport.parkNanos(idleWorkerKeepAliveNs)
+            log("scheduler unpark")
             // try terminate when we are idle past termination deadline
             // note that comparison is written like this to protect against potential nanoTime wraparound
             if (System.nanoTime() - terminationDeadline >= 0) {
@@ -1089,11 +1132,17 @@ internal fun withUnlimitedIOScheduler(blocking: () -> Unit) {
 
 private fun withoutCpuPermit(body: () -> Unit) {
     val worker = Thread.currentThread() as? CoroutineScheduler.Worker ?: return body()
+    worker.scheduler.log("runBlocking: releasing CPU...")
     val releasedPermit = worker.releaseCpu()
+    worker.scheduler.log("runBlocking: released CPU")
     try {
         return body()
     } finally {
-        if (releasedPermit) worker.reacquireCpu()
+        if (releasedPermit) {
+        worker.scheduler.log("runBlocking: reacquiring CPU...")
+            worker.reacquireCpu()
+        worker.scheduler.log("runBlocking: reacquired CPU")
+        }
     }
 }
 
