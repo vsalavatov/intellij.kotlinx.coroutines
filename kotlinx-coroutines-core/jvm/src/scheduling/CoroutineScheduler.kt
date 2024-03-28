@@ -314,8 +314,8 @@ internal class CoroutineScheduler(
 
     public fun log(msg: String) {
         if (currentThread().toString().contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")) return
-        val msgwide = if (msg.length < 70) msg + " ".repeat(70 - msg.length) else msg
-        System.err.println("${currentThread().name.substringBefore(" @")} ${(currentThread() as? Worker)?.state.toString().substring(0, 3)}| $msgwide | ${this@CoroutineScheduler}")
+        val pre = "${currentThread().name.substringBefore(" @")} ${(currentThread() as? Worker)?.state.toString().substring(0, 3)}".padEnd("CoroutineScheduler-worker-1 BLO".length)
+        System.err.println("$pre | ${msg.padEnd(70)} | ${this@CoroutineScheduler}")
     }
 
     companion object {
@@ -402,6 +402,7 @@ internal class CoroutineScheduler(
      *   - Concurrent [close] that effectively shutdowns the worker thread
      */
     fun dispatch(block: Runnable, taskContext: TaskContext = NonBlockingContext, tailDispatch: Boolean = false) {
+        log("dispatch blocking=${taskContext.taskMode} $block")
         trackTask() // this is needed for virtual time support
         val task = createTask(block, taskContext)
         val isBlockingTask = task.isBlocking
