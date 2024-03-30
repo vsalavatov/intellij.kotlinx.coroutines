@@ -69,7 +69,7 @@ class BlockingCoroutineDispatcherTestCorePoolSize1 : SchedulerTestBase() {
 
     @Test
     fun testLivenessOfDefaultDispatcher(): Unit = runBlocking { // (Dispatchers.Default)
-        repeat(30 * stressTestMultiplier) {
+        repeat(50_000 * stressTestMultiplier) {
             System.err.println("======== $it")
             val barrier = CyclicBarrier(2)
             val barrier2 = CompletableDeferred<Unit>()

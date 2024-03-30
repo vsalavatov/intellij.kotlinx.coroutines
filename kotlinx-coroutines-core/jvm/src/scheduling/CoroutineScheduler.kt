@@ -7,6 +7,8 @@ import java.io.*
 import java.lang.Thread.*
 import java.util.concurrent.*
 import java.util.concurrent.locks.*
+import kotlin.concurrent.*
+import kotlin.jvm.Volatile
 import kotlin.jvm.internal.Ref.ObjectRef
 import kotlin.math.*
 import kotlin.random.*
@@ -313,12 +315,30 @@ internal class CoroutineScheduler(
     val isTerminated: Boolean get() = _isTerminated.value
 
     public fun log(msg: String) {
-        if (currentThread().toString().contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")) return
-        val pre = "${currentThread().name.substringBefore(" @")} ${(currentThread() as? Worker)?.state.toString().substring(0, 3)}".padEnd("CoroutineScheduler-worker-1 BLO".length)
-        System.err.println("$pre | ${msg.padEnd(70)} | ${this@CoroutineScheduler}")
+        @Suppress("UNUSED_EXPRESSION")
+        msg
+//        if (currentThread().toString().contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")) return
+//        val pre = "${currentThread().name.substringBefore(" @")} ${(currentThread() as? Worker)?.state.toString().substring(0, 3)}".padEnd("CoroutineScheduler-worker-1 BLO".length)
+//        logMsgs[logIndex.getAndIncrement()] = "$pre | ${msg.padEnd(70)} | ${this@CoroutineScheduler}"
     }
 
     companion object {
+//        private val logMsgs = Array<String?>(2_000_000) { null }
+//        private val logIndex = atomic(0)
+//        private val logPrintIndex = atomic(0)
+//
+//        init {
+//            thread(isDaemon = true) {
+//                while (true) {
+//                    if (logPrintIndex.value < logIndex.value) {
+//                        while (logMsgs[logPrintIndex.value] == null) {Thread.sleep(1)}
+//                        System.err.println(logMsgs[logPrintIndex.getAndIncrement()])
+//                        logMsgs[logPrintIndex.value - 1] = null
+//                    }
+//                }
+//            }
+//        }
+
         // A symbol to mark workers that are not in parkedWorkersStack
         @JvmField
         val NOT_IN_STACK = Symbol("NOT_IN_STACK")
@@ -726,6 +746,10 @@ internal class CoroutineScheduler(
             if (state == WorkerState.CPU_ACQUIRED) {
                 val ib = incrementBlockingTasks(); log("releaseCpu: inc blocking; ${ib.asStateString()}")
                 tryReleaseCpu(WorkerState.BLOCKING); log("releaseCpu: release CPU")
+                if (stolenTask.element != null) {
+                    addToGlobalQueue(stolenTask.element!!)
+                    stolenTask.element = null
+                }
                 signalCpuWork()
                 return true
             }
@@ -855,6 +879,14 @@ internal class CoroutineScheduler(
              * - T1 unparks T2, bails out with success
              * - T2 unparks and loops in 'while (inStack())'
              */
+            // pop stack op order: pop stack -> set not in stack -> unpark if CAS PARK->CLAIM succeed
+            /*
+             * - T2 !inStack -> stack push
+             * - T2 try to find task again, fail, tryPark: ctl = PARK
+             * - T1 stack pop [= T2]
+             * - T2 returns from tryPark, goes to scan again
+             * - T2
+             */
             while (inStack() && workerCtl.value == PARKED) { // Prevent spurious wakeups
                 if (isTerminated || state == WorkerState.TERMINATED) break
                 tryReleaseCpu(WorkerState.PARKING)
@@ -922,9 +954,10 @@ internal class CoroutineScheduler(
             // set termination deadline the first time we are here (it is reset in idleReset)
             if (terminationDeadline == 0L) terminationDeadline = System.nanoTime() + idleWorkerKeepAliveNs
             // actually park
-            log("scheduler park")
+//            log("scheduler park")
+//            interrupted() // Cleanup interruptions
             LockSupport.parkNanos(idleWorkerKeepAliveNs)
-            log("scheduler unpark")
+//            log("scheduler unpark")
             // try terminate when we are idle past termination deadline
             // note that comparison is written like this to protect against potential nanoTime wraparound
             if (System.nanoTime() - terminationDeadline >= 0) {

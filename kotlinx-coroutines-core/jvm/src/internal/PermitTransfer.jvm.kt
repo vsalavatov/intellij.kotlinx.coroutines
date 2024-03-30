@@ -1,5 +1,7 @@
 package kotlinx.coroutines.internal
 
+import kotlinx.coroutines.scheduling.*
+import kotlinx.coroutines.scheduling.CoroutineScheduler
 import java.util.concurrent.locks.*
 
 internal actual class PermitTransfer {
@@ -12,6 +14,7 @@ internal actual class PermitTransfer {
                 try {
                     releasePermit()
                 } finally {
+//                    (blockedThread as? CoroutineScheduler.Worker)?.scheduler?.log("permit transfer releaseFun: unparking ${blockedThread.name}")
                     LockSupport.unpark(blockedThread)
                 }
             }
@@ -29,6 +32,8 @@ internal actual class PermitTransfer {
                 }
                 return
             }
+//            (Thread.currentThread() as? CoroutineScheduler.Worker)?.scheduler?.log("permit transfer acquire: parking")
+//            LockSupport.park(this)
             LockSupport.park()
         }
     }
