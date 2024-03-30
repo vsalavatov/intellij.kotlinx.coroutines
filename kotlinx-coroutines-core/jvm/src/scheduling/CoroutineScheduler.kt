@@ -307,7 +307,7 @@ internal class CoroutineScheduler(
     }
 
     private inline fun releaseCpuPermit() = controlState.addAndGet(1L shl CPU_PERMITS_SHIFT).also {
-        log("releaseCpuPermit: ${it.asStateString()}")
+//        log("releaseCpuPermit: ${it.asStateString()}")
     }
 
     // This is used a "stop signal" for close and shutdown functions
@@ -320,6 +320,7 @@ internal class CoroutineScheduler(
 //        if (currentThread().toString().contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")) return
 //        val pre = "${currentThread().name.substringBefore(" @")} ${(currentThread() as? Worker)?.state.toString().substring(0, 3)}".padEnd("CoroutineScheduler-worker-1 BLO".length)
 //        logMsgs[logIndex.getAndIncrement()] = "$pre | ${msg.padEnd(70)} | ${this@CoroutineScheduler}"
+//        System.err.println("$pre | ${msg.padEnd(70)} | ${this@CoroutineScheduler}")
     }
 
     companion object {
@@ -470,18 +471,19 @@ internal class CoroutineScheduler(
 
     fun signalCpuWork() {
         if (tryUnpark()) {
-            log("signalCpu: unparked another worker")
+//            log("signalCpu: unparked another worker")
             return
         }
         if (tryCreateWorker()) {
-            log("signalCpu: created another worker")
+//            log("signalCpu: created another worker")
             return
         }
-        if (tryUnpark()) {
-            log("signalCpu: unparked another worker 2")
-        } else {
-            log("signalCpu: failed to signal!!!")
-        }
+        tryUnpark()
+//        if (tryUnpark()) {
+//            log("signalCpu: unparked another worker 2")
+//        } else {
+//            log("signalCpu: failed to signal!!!")
+//        }
     }
 
     private fun tryCreateWorker(state: Long = controlState.value): Boolean {
@@ -743,13 +745,17 @@ internal class CoroutineScheduler(
         /** only for [withoutCpuPermit] */
         fun releaseCpu(): Boolean {
             assert { state == WorkerState.CPU_ACQUIRED || state == WorkerState.BLOCKING }
+            if (stolenTask.element != null) {
+                addToGlobalQueue(stolenTask.element!!)
+                stolenTask.element = null
+                System.err.println("RETURN STOLEN")
+            }
             if (state == WorkerState.CPU_ACQUIRED) {
-                val ib = incrementBlockingTasks(); log("releaseCpu: inc blocking; ${ib.asStateString()}")
-                tryReleaseCpu(WorkerState.BLOCKING); log("releaseCpu: release CPU")
-                if (stolenTask.element != null) {
-                    addToGlobalQueue(stolenTask.element!!)
-                    stolenTask.element = null
-                }
+//                val ib =
+                    incrementBlockingTasks();
+//                log("releaseCpu: inc blocking; ${ib.asStateString()}")
+                tryReleaseCpu(WorkerState.BLOCKING);
+//                log("releaseCpu: release CPU")
                 signalCpuWork()
                 return true
             }
@@ -1166,9 +1172,9 @@ internal fun withUnlimitedIOScheduler(blocking: () -> Unit) {
 
 private fun withoutCpuPermit(body: () -> Unit) {
     val worker = Thread.currentThread() as? CoroutineScheduler.Worker ?: return body()
-    worker.scheduler.log("runBlocking: releasing CPU...")
+//    worker.scheduler.log("runBlocking: releasing CPU...")
     val releasedPermit = worker.releaseCpu()
-    worker.scheduler.log("runBlocking: released CPU")
+//    worker.scheduler.log("runBlocking: released CPU")
     try {
         return body()
     } finally {

@@ -10,8 +10,10 @@ internal actual abstract class EventLoopImplPlatform: EventLoop() {
 
     protected actual fun unpark() {
         val thread = thread // atomic read
-        if (Thread.currentThread() !== thread)
+        if (Thread.currentThread() !== thread) {
+            (Thread.currentThread() as? CoroutineScheduler.Worker ?: (thread as? CoroutineScheduler.Worker))?.scheduler?.log("EventLoop unpark ${thread.name} from ${Thread.currentThread().name}")
             unpark(thread)
+        }
     }
 
     protected actual open fun reschedule(now: Long, delayedTask: EventLoopImplBase.DelayedTask) {

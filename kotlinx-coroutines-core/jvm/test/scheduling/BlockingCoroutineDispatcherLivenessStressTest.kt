@@ -4,6 +4,7 @@ import kotlinx.coroutines.testing.*
 import kotlinx.coroutines.*
 import org.junit.*
 import org.junit.Test
+import java.lang.management.ManagementFactory
 import java.util.concurrent.*
 import java.util.concurrent.atomic.*
 import kotlin.test.*
@@ -69,21 +70,37 @@ class BlockingCoroutineDispatcherTestCorePoolSize1 : SchedulerTestBase() {
 
     @Test
     fun testLivenessOfDefaultDispatcher(): Unit = runBlocking { // (Dispatchers.Default)
-        repeat(50_000 * stressTestMultiplier) {
-            System.err.println("======== $it")
+        val oldRunBlockings = ArrayDeque<Job>()
+        var maxOldRunBlockings = 0
+        repeat(150_000 * stressTestMultiplier) {
+            if (oldRunBlockings.size > maxOldRunBlockings) {
+                maxOldRunBlockings = oldRunBlockings.size
+            }
+            if (it % 1000 == 0) {
+                System.err.println("======== $it, " +
+                    "peak thread count=${ManagementFactory.getThreadMXBean().peakThreadCount}, " +
+                    "old runBlocking count=${oldRunBlockings.size}, " +
+                    "max old runBlocking count=${maxOldRunBlockings}")
+            }
             val barrier = CyclicBarrier(2)
             val barrier2 = CompletableDeferred<Unit>()
-            val jj = launch(dispatcher) {
+            val blocking = launch(dispatcher) {
                 barrier.await()
                 runBlocking {
                     barrier2.await()
                 }
             }
+            oldRunBlockings.addLast(blocking)
             val task = async(dispatcher) { 42 }
             barrier.await()
             task.join()
             barrier2.complete(Unit)
-            // jj.join()
+
+            oldRunBlockings.removeIf(Job::isCompleted)
+            while (oldRunBlockings.size > 5) {
+                val oldJob = oldRunBlockings.removeFirst()
+                while (!oldJob.isCompleted) { /* busy spin, must not be job.await() */ }
+            }
         }
     }
 }

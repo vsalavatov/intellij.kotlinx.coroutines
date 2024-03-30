@@ -51,7 +51,7 @@ internal abstract class EventLoop : CoroutineDispatcher() {
         return 0
     }
 
-    protected open val isEmpty: Boolean get() = isUnconfinedQueueEmpty
+    public open val isEmpty: Boolean get() = isUnconfinedQueueEmpty
 
     protected open val nextTime: Long
         get() {
