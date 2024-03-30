@@ -101,9 +101,13 @@ private class BlockingCoroutine<T>(
                     if (isCompleted) break
                     if (parkNanos > 0) {
                         withUnlimitedIOScheduler {
-//                            (currentThread() as? Worker)?.scheduler?.log("runBlocking parking")
-                            parkNanos(this, parkNanos)
-//                            (currentThread() as? Worker)?.scheduler?.log("runBlocking unparked")
+                            (currentThread() as? Worker)?.scheduler?.log("runBlocking parking")
+//                            if (eventLoop?.isEmpty == true) {
+                                parkNanos(this, parkNanos)
+//                            } else {
+//                                (currentThread() as? Worker)?.scheduler?.log("runBlocking EVENT LOOP NOT EMPTY")
+//                            }
+                            (currentThread() as? Worker)?.scheduler?.log("runBlocking unparked")
                         }
                     }
                 }

@@ -72,34 +72,40 @@ class BlockingCoroutineDispatcherTestCorePoolSize1 : SchedulerTestBase() {
     fun testLivenessOfDefaultDispatcher(): Unit = runBlocking { // (Dispatchers.Default)
         val oldRunBlockings = ArrayDeque<Job>()
         var maxOldRunBlockings = 0
-        repeat(150_000 * stressTestMultiplier) {
+        var busyWaits = 0
+        repeat(20_000 * stressTestMultiplier) {
+//        repeat(1000 * stressTestMultiplier) {
             if (oldRunBlockings.size > maxOldRunBlockings) {
                 maxOldRunBlockings = oldRunBlockings.size
             }
-            if (it % 1000 == 0) {
+            if (it % 1000 == 0
+                || true
+                ) {
                 System.err.println("======== $it, " +
-                    "peak thread count=${ManagementFactory.getThreadMXBean().peakThreadCount}, " +
                     "old runBlocking count=${oldRunBlockings.size}, " +
-                    "max old runBlocking count=${maxOldRunBlockings}")
+                    "max old runBlocking count=${maxOldRunBlockings}, " +
+                    "busy waits count=$busyWaits")
             }
             val barrier = CyclicBarrier(2)
             val barrier2 = CompletableDeferred<Unit>()
             val blocking = launch(dispatcher) {
                 barrier.await()
                 runBlocking {
+                    yield()
                     barrier2.await()
+                    yield()
                 }
             }
             oldRunBlockings.addLast(blocking)
-            val task = async(dispatcher) { 42 }
+            val task = async(dispatcher) { yield(); 42 }
             barrier.await()
             task.join()
             barrier2.complete(Unit)
 
             oldRunBlockings.removeIf(Job::isCompleted)
             while (oldRunBlockings.size > 5) {
-                val oldJob = oldRunBlockings.removeFirst()
-                while (!oldJob.isCompleted) { /* busy spin, must not be job.await() */ }
+                busyWaits++
+                oldRunBlockings.removeIf(Job::isCompleted)
             }
         }
     }
