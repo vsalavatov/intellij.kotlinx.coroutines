@@ -293,22 +293,18 @@ internal class CoroutineScheduler(
     private inline fun decrementBlockingTasks() =
         controlState.addAndGet(-(1L shl BLOCKING_SHIFT))
 
-
-    private fun Long.asStateString(): String =
-        "${createdWorkers(this)} created, ${blockingTasks(this)} blocking tasks, ${availableCpuPermits(this)} CPU permits available"
-
     private inline fun tryAcquireCpuPermit(): Boolean = controlState.loop { state ->
         val available = availableCpuPermits(state)
         if (available == 0) return false
         val update = state - (1L shl CPU_PERMITS_SHIFT)
         if (controlState.compareAndSet(state, update)) {
-            log("tryAcquireCpuPermit acquired: ${update.asStateString()}")
+            log("tryAcquireCpuPermit: cpu acquired")
             return true
         }
     }
 
     private inline fun releaseCpuPermit() = controlState.addAndGet(1L shl CPU_PERMITS_SHIFT).also {
-        log("releaseCpuPermit: ${it.asStateString()}")
+        log("releaseCpuPermit")
     }
 
     // This is used a "stop signal" for close and shutdown functions
@@ -318,34 +314,27 @@ internal class CoroutineScheduler(
     public fun log(msg: String) {
         @Suppress("UNUSED_EXPRESSION")
         msg
-        if (currentThread().toString()
-                .contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")
-        ) return
-        val pre = "${currentThread().name.substringBefore(" @")} ${
+        if (currentThread().toString().contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")) return
+        val pre = "${currentThread().name.removePrefix(schedulerName).substringBefore(" @")} ${
             (currentThread() as? Worker)?.state.toString().substring(0, 3)
-        }".padEnd("CoroutineScheduler-worker-1 BLO".length)
+        }".padEnd("Test worker nul".length)
         val idx = logIndex.getAndIncrement()
-        while (logMsgs[idx % logMsgs.size] != null) {
-            logIndex.value
-        }
-        logMsgs[idx % logMsgs.size] = "$pre | ${msg.padEnd(70)} | ${this@CoroutineScheduler}"
-//        System.err.println("$pre | ${msg.padEnd(70)} | ${this@CoroutineScheduler}")
+        logMsgs[idx % logMsgs.size] = "$pre | ${this@CoroutineScheduler} | ${msg}"
     }
 
     companion object {
-        private val logMsgs = Array<String?>(2_000_000) { null }
+        private val logMsgs = Array<String?>(10_000) { null }
         private val logIndex = atomic(0)
-        private val logPrintIndex = atomic(0)
 
         init {
             thread(isDaemon = true) {
-                while (true) {
-                    val idx = logPrintIndex.getAndIncrement() % logMsgs.size
-                    while (logMsgs[idx] == null) {
-                        logPrintIndex.value
-                    }
-                    System.err.println(logMsgs[idx])
-                    logMsgs[idx] = null
+                try {
+                    Thread.sleep(30_000) // must catch a freeze in 30 seconds
+                } catch (e: InterruptedException) { }
+                Thread.interrupted()
+
+                ((logIndex.value - logMsgs.size).coerceAtLeast(0) ..< logIndex.value).forEach {
+                    System.err.println(logMsgs[it % logMsgs.size])
                 }
             }
         }
@@ -623,24 +612,26 @@ internal class CoroutineScheduler(
             }
         }
         val state = controlState.value
-        return "$schedulerName@$hexAddress[" +
-            "Pool Size {" +
-            "core = $corePoolSize, " +
-            "max = $maxPoolSize}, " +
-            "Worker States {" +
-            "CPU = $cpuWorkers, " +
-            "blocking = $blockingWorkers, " +
-            "parked = $parkedWorkers, " +
-            "dormant = $dormant, " +
-            "terminated = $terminated}, " +
-            "running workers queues = $queueSizes, " +
-            "global CPU queue size = ${globalCpuQueue.size}, " +
-            "global blocking queue size = ${globalBlockingQueue.size}, " +
-            "Control State {" +
-            "created workers= ${createdWorkers(state)}, " +
-            "blocking tasks = ${blockingTasks(state)}, " +
-            "CPUs acquired = ${corePoolSize - availableCpuPermits(state)}" +
-            "}]"
+        return "" +
+//        "$schedulerName@$hexAddress[" +
+//            "Pool Size {" +
+//            "core = $corePoolSize, " +
+//            "max = $maxPoolSize}, " +
+//            "Worker States {" +
+            "W${createdWorkers(state)}" +
+            "C$cpuWorkers" +
+            "B$blockingWorkers" +
+            "P$parkedWorkers" +
+            "D$dormant" +
+            "T$terminated | " +
+//            "running workers queues = $queueSizes, " +
+            "GCPU ${globalCpuQueue.size} " +
+            "GBLO ${globalBlockingQueue.size} "+
+            "BT ${blockingTasks(state)}" +
+//            "Control State {" +
+
+//            "CPUs acquired = ${corePoolSize - availableCpuPermits(state)}" +
+            ""
     }
 
     fun runSafely(task: Task) {
@@ -757,14 +748,8 @@ internal class CoroutineScheduler(
         fun releaseCpu(): Boolean {
             assert { state == WorkerState.CPU_ACQUIRED || state == WorkerState.BLOCKING }
             if (state == WorkerState.CPU_ACQUIRED) {
-                returnStolenTask()
-                returnLocalQueue()
-
-                val ib =
-                    incrementBlockingTasks();
-                log("releaseCpu: inc blocking; ${ib.asStateString()}")
+                incrementBlockingTasks();log("releaseCpu: inc blocking")
                 tryReleaseCpu(WorkerState.BLOCKING);
-                log("releaseCpu: release CPU")
                 signalCpuWork()
                 return true
             }
@@ -775,8 +760,8 @@ internal class CoroutineScheduler(
         fun reacquireCpu() {
             assert { state == WorkerState.BLOCKING }
             if (tryAcquireCpuPermit()) {
-                log("reacquireCpu: acquired CPU fast")
-                val db = decrementBlockingTasks(); log("reacquireCpu: dec blocking ${db.asStateString()}")
+                log("reacquireCpu: acquired CPU fast, dec blocking")
+                decrementBlockingTasks()
                 return
             }
             val permitTransfer = PermitTransfer()
@@ -784,30 +769,24 @@ internal class CoroutineScheduler(
                 // this code runs in a different worker thread that holds a CPU token
                 val cpuHolder = currentThread() as Worker
                 assert { cpuHolder.state == WorkerState.CPU_ACQUIRED }
-                cpuHolder.returnStolenTask()
-                cpuHolder.returnLocalQueue()
+                cpuHolder.giveAwayLocalTasks()
                 cpuHolder.state = WorkerState.BLOCKING
-                log("releasing CPU!")
+                log("releasing CPU to runBlocking thread!")
             }, taskContext = NonBlockingContext)
             log("reacquireCpu: releaseFun dispatched")
             permitTransfer.acquire(
                 tryAllocatePermit = this@CoroutineScheduler::tryAcquireCpuPermit,
                 deallocatePermit = ::releaseCpuPermit
             )
-            log("reacquireCpu: acquired CPU slow")
             state = WorkerState.CPU_ACQUIRED
-            val db2 = decrementBlockingTasks(); log("reacquireCpu: dec blocking slow ${db2.asStateString()}")
+            decrementBlockingTasks(); log("reacquireCpu: acquired CPU slow, dec blocking slow")
         }
 
-        private fun returnStolenTask() {
-            val task = stolenTask.element
-            if (task != null) {
+        fun giveAwayLocalTasks() {
+            stolenTask.element?.let { task ->
                 addToGlobalQueue(task)
                 stolenTask.element = null
             }
-        }
-
-        private fun returnLocalQueue() {
             while (true) {
                 val task = localQueue.poll() ?: return
                 addToGlobalQueue(task)
@@ -922,7 +901,20 @@ internal class CoroutineScheduler(
              */
             while (inStack() && workerCtl.value == PARKED) { // Prevent spurious wakeups
                 if (isTerminated || state == WorkerState.TERMINATED) break
-                tryReleaseCpu(WorkerState.PARKING)
+                val hadCpu = tryReleaseCpu(WorkerState.PARKING)
+                if (hadCpu && !globalCpuQueue.isEmpty) {
+                    /*
+                     * Prevents the following race: consider corePoolSize = 1
+                     * - T_CPU holds the only CPU permit, scans the tasks, doesn't find anything, places itself on a stack
+                     * - T_CPU scans again, doesn't find anything again, suspends at tryPark()
+                     * - T_B (or several workers in BLOCKING mode) also put themselves on the stack, on top of the T_CPU
+                     * - T* (not a worker) dispatches CPU tasks, wakes up T_B
+                     * - T_B can't acquire a CPU permit, scans blocking queue, doesn't find anything, parks
+                     * - T_CPU releases the CPU permit, parks
+                     * - there are tasks in the CPU queue, but all workers are parked, so the scheduler won't make progress until there is another dispatch
+                     */
+                    break
+                }
                 interrupted() // Cleanup interruptions
                 park()
             }
@@ -1065,7 +1057,11 @@ internal class CoroutineScheduler(
         }
 
         fun findTask(mayHaveLocalTasks: Boolean): Task? {
-            if (tryAcquireCpuPermit()) return findAnyTask(mayHaveLocalTasks)
+            if (tryAcquireCpuPermit()) {
+                return findAnyTask(mayHaveLocalTasks).also {
+                    log("findTask CPU: $it")
+                }
+            }
             /*
              * If we can't acquire a CPU permit, attempt to find blocking task:
              * - Check if our queue has one (maybe mixed in with CPU tasks)
@@ -1219,6 +1215,7 @@ internal fun withUnlimitedIOScheduler(blocking: () -> Unit) {
     val worker = Thread.currentThread() as? CoroutineScheduler.Worker
         ?: return blocking()
     with(worker) {
+        giveAwayLocalTasks()
         withoutCpuPermit {
             withTaskBlockingDispatch {
                 blocking()

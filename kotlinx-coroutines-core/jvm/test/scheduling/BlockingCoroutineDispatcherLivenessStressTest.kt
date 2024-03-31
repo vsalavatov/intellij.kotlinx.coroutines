@@ -4,7 +4,10 @@ import kotlinx.coroutines.testing.*
 import kotlinx.coroutines.*
 import org.junit.*
 import org.junit.Test
+import org.junit.runner.*
+import org.junit.runners.*
 import java.lang.management.ManagementFactory
+import java.util.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.*
 import kotlin.test.*
@@ -63,41 +66,54 @@ class BlockingCoroutineDispatcherLivenessStressTest : SchedulerTestBase() {
 }
 
 
-class BlockingCoroutineDispatcherTestCorePoolSize1 : SchedulerTestBase() {
+@RunWith(Parameterized::class)
+class BlockingCoroutineDispatcherTestCorePoolSize1(val yieldMask: Int) : SchedulerTestBase() {
     init {
         corePoolSize = 1
     }
 
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters
+        fun data(): Array<Array<Any?>> {
+            return Array(50 * stressTestMultiplier) { arrayOf(it) }
+        }
+    }
+
     @Test
-    fun testLivenessOfDefaultDispatcher(): Unit = runBlocking { // (Dispatchers.Default)
-        val oldRunBlockings = ArrayDeque<Job>()
+    fun testLivenessOfDefaultDispatcher(): Unit = runBlocking {
+        val oldRunBlockings = LinkedList<Job>()
         var maxOldRunBlockings = 0
         var busyWaits = 0
-        repeat(20_000 * stressTestMultiplier) {
-//        repeat(1000 * stressTestMultiplier) {
+        repeat(5000 * stressTestMultiplier) {
             if (oldRunBlockings.size > maxOldRunBlockings) {
                 maxOldRunBlockings = oldRunBlockings.size
             }
-            if (it % 1000 == 0
-                || true
-                ) {
-                System.err.println("======== $it, " +
-                    "old runBlocking count=${oldRunBlockings.size}, " +
-                    "max old runBlocking count=${maxOldRunBlockings}, " +
-                    "busy waits count=$busyWaits")
+            if (it % 500 == 0) {
+                val msg = "======== $it, " +
+                    "rb count=${oldRunBlockings.size}, " +
+                    "max rb count=${maxOldRunBlockings}, " +
+                    "busy count=$busyWaits"
+                System.err.println(msg)
+                (dispatcher as SchedulerCoroutineDispatcher).coroutineScheduler.log(msg)
             }
             val barrier = CyclicBarrier(2)
             val barrier2 = CompletableDeferred<Unit>()
             val blocking = launch(dispatcher) {
                 barrier.await()
                 runBlocking {
-                    yield()
+                    if ((yieldMask and 1) != 0) yield()
                     barrier2.await()
-                    yield()
+                    if ((yieldMask and 2) != 0) yield()
                 }
             }
             oldRunBlockings.addLast(blocking)
-            val task = async(dispatcher) { yield(); 42 }
+            val task = async(dispatcher) {
+                if ((yieldMask and 4) != 0) yield()
+                42.also {
+                    if ((yieldMask and 8) != 0) yield()
+                }
+            }
             barrier.await()
             task.join()
             barrier2.complete(Unit)

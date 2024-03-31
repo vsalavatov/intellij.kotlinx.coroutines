@@ -100,7 +100,7 @@ internal open class SchedulerCoroutineDispatcher(
         get() = coroutineScheduler
 
     // This is variable for test purposes, so that we can reinitialize from clean state
-    private var coroutineScheduler = createScheduler()
+    public var coroutineScheduler = createScheduler()
 
     private fun createScheduler() =
         CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
