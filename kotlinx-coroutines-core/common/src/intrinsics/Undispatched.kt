@@ -40,7 +40,9 @@ internal fun <R, T> (suspend (R) -> T).startCoroutineUndispatched(receiver: R, c
  */
 internal fun <T, R> ScopeCoroutine<T>.startUndispatchedOrReturn(receiver: R, block: suspend R.() -> T): Any? {
     return undispatchedResult({ true }) {
-        block.startCoroutineUninterceptedOrReturn(receiver, this)
+        withThreadLocalContext(this.context) {
+            block.startCoroutineUninterceptedOrReturn(receiver, this)
+        }
     }
 }
 
