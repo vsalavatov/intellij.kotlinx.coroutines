@@ -58,7 +58,9 @@ private inline fun <T> startDirect(completion: Continuation<T>, block: (Continua
  */
 internal fun <T, R> ScopeCoroutine<T>.startUndispatchedOrReturn(receiver: R, block: suspend R.() -> T): Any? {
     return undispatchedResult({ true }) {
-        block.startCoroutineUninterceptedOrReturn(receiver, this)
+        withThreadLocalContext(this.context) {
+            block.startCoroutineUninterceptedOrReturn(receiver, this)
+        }
     }
 }
 
