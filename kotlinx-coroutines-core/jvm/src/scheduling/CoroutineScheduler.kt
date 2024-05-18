@@ -756,8 +756,6 @@ internal class CoroutineScheduler(
                     minDelayUntilStealableTaskNs = 0L
                     executeTask(task)
                     continue
-                } else {
-                    mayHaveLocalTasks = false
                 }
                 /*
                  * No tasks were found:
@@ -1024,6 +1022,7 @@ internal class CoroutineScheduler(
                 val globalFirst = nextInt(2 * corePoolSize) == 0
                 if (globalFirst) pollGlobalQueues()?.let { return it }
                 localQueue.poll()?.let { return it }
+                mayHaveLocalTasks = false
                 if (!globalFirst) pollGlobalQueues()?.let { return it }
             } else {
                 pollGlobalQueues()?.let { return it }
