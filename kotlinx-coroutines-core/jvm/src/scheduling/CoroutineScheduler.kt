@@ -4,8 +4,10 @@ import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.internal.*
 import java.io.*
+import java.lang.Thread.currentThread
 import java.util.concurrent.*
 import java.util.concurrent.locks.*
+import kotlin.concurrent.thread
 import kotlin.jvm.internal.Ref.ObjectRef
 import kotlin.math.*
 import kotlin.random.*
@@ -324,7 +326,34 @@ internal class CoroutineScheduler(
     private val _isTerminated = atomic(false)
     val isTerminated: Boolean get() = _isTerminated.value
 
+    public fun log(msg: String) {
+        if (currentThread().toString().contains("DefaultDispatcher") && this@CoroutineScheduler.schedulerName.contains("Default")) return
+        val pre = "${currentThread().name.removePrefix(schedulerName).substringBefore(" @")} ${
+            (currentThread() as? Worker)?.state.toString().substring(0, 3) + 
+                " LQ${((currentThread() as? Worker)?.localQueue?.size ?: -1)}" + 
+                " MHL${((currentThread() as? Worker)?.mayHaveLocalTasks.toString()[0])}"
+        }".padStart("Test worker nul LQ-1 MHL0".length)
+        val idx = logIndex.getAndIncrement()
+        logMsgs[idx % logMsgs.size] = "$pre | ${this@CoroutineScheduler} | $msg"
+    }
+
     companion object {
+        private val logMsgs = Array<String?>(10_000) { null }
+        private val logIndex = atomic(0)
+
+        init {
+            thread(isDaemon = true) {
+                try {
+                    Thread.sleep(30_000) // must catch a freeze in 30 seconds
+                } catch (e: InterruptedException) { }
+                Thread.interrupted()
+
+                ((logIndex.value - logMsgs.size).coerceAtLeast(0) ..< logIndex.value).forEach {
+                    System.err.println(logMsgs[it % logMsgs.size])
+                }
+            }
+        }
+
         // A symbol to mark workers that are not in parkedWorkersStack
         @JvmField
         val NOT_IN_STACK = Symbol("NOT_IN_STACK")
@@ -408,6 +437,7 @@ internal class CoroutineScheduler(
      *   - Concurrent [close] that effectively shutdowns the worker thread
      */
     fun dispatch(block: Runnable, taskContext: TaskContext = NonBlockingContext, tailDispatch: Boolean = false) {
+        log("dispatch blocking=${taskContext.taskMode} $block")
         trackTask() // this is needed for virtual time support
         val task = createTask(block, taskContext)
         val isBlockingTask = task.isBlocking
@@ -454,9 +484,20 @@ internal class CoroutineScheduler(
     }
 
     fun signalCpuWork() {
-        if (tryUnpark()) return
-        if (tryCreateWorker()) return
-        tryUnpark()
+        if (tryUnpark()) {
+            log("signalCpu: unparked another worker")
+            return
+        }
+        if (tryCreateWorker()) {
+            log("signalCpu: created another worker")
+            return
+        }
+//        tryUnpark()
+        if (tryUnpark()) {
+            log("signalCpu: unparked another worker 2")
+        } else {
+            log("signalCpu: failed to signal!!!")
+        }
     }
 
     private fun tryCreateWorker(state: Long = controlState.value): Boolean {
@@ -478,9 +519,13 @@ internal class CoroutineScheduler(
     private fun tryUnpark(): Boolean {
         while (true) {
             val worker = parkedWorkersStackPop() ?: return false
+            log("tryUnpark: popped ${worker.name} from stack")
             if (worker.workerCtl.compareAndSet(PARKED, CLAIMED)) {
+                log("tryUnpark: unparking ${worker.name}")
                 LockSupport.unpark(worker)
                 return true
+            } else {
+                log("tryUnpark: ${worker.name} is running (${worker.workerCtl.value == CLAIMED})")
             }
         }
     }
@@ -511,6 +556,7 @@ internal class CoroutineScheduler(
             worker = Worker(newIndex)
             workers.setSynchronized(newIndex, worker)
             require(newIndex == incrementCreatedWorkers())
+            log("spawned new worker $newIndex")
             cpuWorkers + 1
         }.also { worker.start() } // Start worker when the lock is released to reduce contention, see #3652
     }
@@ -530,6 +576,7 @@ internal class CoroutineScheduler(
         if (task.mode == TASK_NON_BLOCKING && state === WorkerState.BLOCKING) {
             return task
         }
+        log("submit to local queue")
         mayHaveLocalTasks = true
         return localQueue.add(task, fair = tailDispatch)
     }
@@ -577,24 +624,29 @@ internal class CoroutineScheduler(
             }
         }
         val state = controlState.value
-        return "$schedulerName@$hexAddress[" +
-            "Pool Size {" +
-            "core = $corePoolSize, " +
-            "max = $maxPoolSize}, " +
-            "Worker States {" +
-            "CPU = $cpuWorkers, " +
-            "blocking = $blockingWorkers, " +
-            "parked = $parkedWorkers, " +
-            "dormant = $dormant, " +
-            "terminated = $terminated}, " +
-            "running workers queues = $queueSizes, " +
-            "global CPU queue size = ${globalCpuQueue.size}, " +
-            "global blocking queue size = ${globalBlockingQueue.size}, " +
-            "Control State {" +
-            "created workers= ${createdWorkers(state)}, " +
-            "blocking tasks = ${blockingTasks(state)}, " +
-            "CPUs acquired = ${corePoolSize - availableCpuPermits(state)}" +
-            "}]"
+        val decompensationReqs = cpuDecompensationRequests.value
+        return "" +
+//        "$schedulerName@$hexAddress[" +
+//            "Pool Size {" +
+//            "core = $corePoolSize, " +
+//            "max = $maxPoolSize}, " +
+//            "Worker States {" +
+            "W${createdWorkers(state)}" +
+            "C$cpuWorkers" +
+            "B$blockingWorkers" +
+            "P$parkedWorkers" +
+            "D$dormant" +
+            "T$terminated | " +
+//            "running workers queues = $queueSizes, " +
+            "GCPU ${globalCpuQueue.size} " +
+            "GBLO ${globalBlockingQueue.size} "+
+            "BT ${blockingTasks(state)} |" +
+            "CP ${availableCpuPermits(state)} " +
+            "DR $decompensationReqs" +
+//            "Control State {" +
+
+//            "CPUs acquired = ${corePoolSize - availableCpuPermits(state)}" +
+            ""
     }
 
     fun runSafely(task: Task) {
@@ -756,8 +808,6 @@ internal class CoroutineScheduler(
                     minDelayUntilStealableTaskNs = 0L
                     executeTask(task)
                     continue
-                } else {
-                    mayHaveLocalTasks = false
                 }
                 /*
                  * No tasks were found:
@@ -820,7 +870,9 @@ internal class CoroutineScheduler(
         // Counterpart to "tryUnpark"
         private fun tryPark() {
             if (!inStack()) {
-                parkedWorkersStackPush(this)
+                if (parkedWorkersStackPush(this)) {
+                    log("wasn't on stack, pushed on stack")
+                }
                 return
             }
             workerCtl.value = PARKED // Update value once
@@ -866,7 +918,9 @@ internal class CoroutineScheduler(
             idleReset(taskMode)
             beforeTask(taskMode)
             currentTask = task
+            log("executing task...")
             runSafely(task)
+            log("...executed task")
             currentTask = null
             afterTask(taskMode)
         }
@@ -917,7 +971,9 @@ internal class CoroutineScheduler(
             // set termination deadline the first time we are here (it is reset in idleReset)
             if (terminationDeadline == 0L) terminationDeadline = System.nanoTime() + idleWorkerKeepAliveNs
             // actually park
+            log("scheduler park")
             LockSupport.parkNanos(idleWorkerKeepAliveNs)
+            log("scheduler unpark")
             // try terminate when we are idle past termination deadline
             // note that comparison is written like this to protect against potential nanoTime wraparound
             if (System.nanoTime() - terminationDeadline >= 0) {
@@ -978,6 +1034,7 @@ internal class CoroutineScheduler(
                  * 5) It is safe to clear reference from workers array now.
                  */
                 workers.setSynchronized(lastIndex, null)
+                scheduler.log("$oldIndex terminated")
             }
             state = WorkerState.TERMINATED
         }
@@ -992,7 +1049,11 @@ internal class CoroutineScheduler(
         }
 
         fun findTask(mayHaveLocalTasks: Boolean): Task? {
-            if (tryAcquireCpuPermit()) return findAnyTask(mayHaveLocalTasks)
+            if (tryAcquireCpuPermit()) {
+                return findAnyTask(mayHaveLocalTasks).also {
+                    log("findTask CPU: $it")
+                }
+            }
             /*
              * If we can't acquire a CPU permit, attempt to find blocking task:
              * - Check if our queue has one (maybe mixed in with CPU tasks)
@@ -1024,6 +1085,7 @@ internal class CoroutineScheduler(
                 val globalFirst = nextInt(2 * corePoolSize) == 0
                 if (globalFirst) pollGlobalQueues()?.let { return it }
                 localQueue.poll()?.let { return it }
+                mayHaveLocalTasks = false; log("mayHaveLocalTasks = false")
                 if (!globalFirst) pollGlobalQueues()?.let { return it }
             } else {
                 pollGlobalQueues()?.let { return it }
@@ -1076,13 +1138,15 @@ internal class CoroutineScheduler(
                 // hard-to-notice concurrency issues. Instead, let's increase the core pool size effectively by
                 // increasing the number of blocking tasks and the available cpu permits. The increase in the number
                 // of blocking tasks will make the scheduler treat the current worker as a non-CPU one.
-                incrementBlockingTasks()
+                incrementBlockingTasks(); log("inc blocking tasks")
                 if (tryDecrementDecompensationRequests()) {
                     // instead of increasing the parallelism limit, we removed a request to decrease it
+                    log("increaseParallelismAndLimit: decompensated")
                 } else {
-                    releaseCpuPermit()
+                    releaseCpuPermit(); log("increaseParallelismAndLimit: new cpu permit")
                 }
                 signalCpuWork()
+                log("increaseParallelismAndLimit: signalled cpu")
             }
             val taskParallelismCompensation = (currentTask as? TaskImpl)?.block as? ParallelismCompensation
             taskParallelismCompensation?.increaseParallelismAndLimit()
@@ -1093,8 +1157,8 @@ internal class CoroutineScheduler(
             val taskParallelismCompensation = (currentTask as? TaskImpl)?.block as? ParallelismCompensation
             taskParallelismCompensation?.decreaseParallelismLimit()
             if (state == WorkerState.CPU_ACQUIRED) {
-                decrementBlockingTasks()
-                cpuDecompensationRequests.incrementAndGet()
+                decrementBlockingTasks(); log("decreaseParallelismLimit: dec blocking tasks")
+                cpuDecompensationRequests.incrementAndGet(); log("decreaseParallelismLimit: inc decompensation reqs")
             }
         }
     }

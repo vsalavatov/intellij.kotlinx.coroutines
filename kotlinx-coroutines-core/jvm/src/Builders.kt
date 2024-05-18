@@ -4,7 +4,9 @@
 
 package kotlinx.coroutines
 
+import kotlinx.coroutines.scheduling.CoroutineScheduler.Worker
 import kotlinx.coroutines.scheduling.compensateParallelism
+import java.lang.Thread.currentThread
 import kotlin.contracts.*
 import kotlin.coroutines.*
 
@@ -96,7 +98,9 @@ private class BlockingCoroutine<T>(
                     // note: process next even may loose unpark flag, so check if completed before parking
                     if (isCompleted) break
                     compensateParallelism {
+                        (currentThread() as? Worker)?.scheduler?.log("runBlocking parking...")
                         parkNanos(this, parkNanos)
+                        (currentThread() as? Worker)?.scheduler?.log("runBlocking unparked")
                     }
                 }
             } finally { // paranoia
