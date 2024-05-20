@@ -7,6 +7,10 @@ import kotlin.coroutines.*
 
 /**
  * Introduced as part of IntelliJ patches.
+ *
+ * CoroutineDispatchers may optionally implement this interface to declare an ability to construct [SoftLimitedDispatcher]
+ * on top of themselves. This is not possible in general case, because the worker of the underlying dispatcher must
+ * implement [ParallelismCompensation] and properly propagate such requests to the task it is running.
  */
 internal interface SoftLimitedParallelism {
     fun softLimitedParallelism(parallelism: Int): CoroutineDispatcher
