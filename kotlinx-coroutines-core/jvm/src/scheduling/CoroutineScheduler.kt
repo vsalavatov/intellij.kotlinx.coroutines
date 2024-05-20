@@ -13,10 +13,10 @@ import kotlin.random.*
 /**
  * ## IntelliJ-patch
  *
- * Number of CPU workers may temporarily exceed `corePoolSize` now due to [parallelism compensation][compensateParallelism] capability.
+ * Number of CPU workers may temporarily exceed `corePoolSize` now due to [parallelism compensation][withCompensatedParallelism] capability.
  * CPU workers try to process decompensation requests after each task completion and upon CPU permit release ([Worker.tryDecompensateCpu]).
  *
- * If there are many consecutive invocations of [compensateParallelism] (such as in [runBlocking]), then
+ * If there are many consecutive invocations of [withCompensatedParallelism] (such as in [runBlocking]), then
  * [Worker.increaseParallelismAndLimit] and [Worker.decreaseParallelismLimit] have a chance to negate each other, meaning
  * that [Worker.increaseParallelismAndLimit] may drop one decompensation request from previous [Worker.decreaseParallelismLimit]
  * so that the compensating CPU worker doesn't have to release its CPU permit and reacquire it back.

@@ -10,7 +10,7 @@ import kotlinx.coroutines.InternalCoroutinesApi
  * that eventually it will adjust to meet it.
  */
 @InternalCoroutinesApi
-public fun <T> compensateParallelism(body: () -> T): T {
+public fun <T> withCompensatedParallelism(body: () -> T): T {
     // CoroutineScheduler.Worker implements ParallelismCompensation
     val worker = Thread.currentThread() as? ParallelismCompensation
         ?: return body()
