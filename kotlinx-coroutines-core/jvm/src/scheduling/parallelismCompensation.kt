@@ -1,7 +1,5 @@
 package kotlinx.coroutines.scheduling
 
-import kotlinx.coroutines.InternalCoroutinesApi
-
 /**
  * Introduced as part of IntelliJ patches.
  *
@@ -9,8 +7,7 @@ import kotlinx.coroutines.InternalCoroutinesApi
  * After the [body] completes, the effective parallelism may stay higher than the associated limit, but it is said
  * that eventually it will adjust to meet it.
  */
-@InternalCoroutinesApi
-public fun <T> withCompensatedParallelism(body: () -> T): T {
+internal fun <T> withCompensatedParallelism(body: () -> T): T {
     // CoroutineScheduler.Worker implements ParallelismCompensation
     val worker = Thread.currentThread() as? ParallelismCompensation
         ?: return body()
