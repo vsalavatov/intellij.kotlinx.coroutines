@@ -1089,11 +1089,14 @@ internal class CoroutineScheduler(
 
         override fun decreaseParallelismLimit() {
             assert { currentTask != null }
-            val taskParallelismCompensation = (currentTask as? TaskImpl)?.block as? ParallelismCompensation
-            taskParallelismCompensation?.decreaseParallelismLimit()
-            if (state == WorkerState.CPU_ACQUIRED) {
-                decrementBlockingTasks()
-                cpuDecompensationRequests.incrementAndGet()
+            try {
+                val taskParallelismCompensation = (currentTask as? TaskImpl)?.block as? ParallelismCompensation
+                taskParallelismCompensation?.decreaseParallelismLimit()
+            } finally {
+                if (state == WorkerState.CPU_ACQUIRED) {
+                    decrementBlockingTasks()
+                    cpuDecompensationRequests.incrementAndGet()
+                }
             }
         }
     }
