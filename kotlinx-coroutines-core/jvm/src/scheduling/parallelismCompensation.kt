@@ -1,5 +1,8 @@
 package kotlinx.coroutines.scheduling
 
+private val parallelismCompensationEnabled: Boolean =
+    System.getProperty("kotlinx.coroutines.parallelism.compensation", "true").toBoolean()
+
 /**
  * Introduced as part of IntelliJ patches.
  *
@@ -8,6 +11,9 @@ package kotlinx.coroutines.scheduling
  * that eventually it will adjust to meet it.
  */
 internal fun <T> withCompensatedParallelism(body: () -> T): T {
+    if (!parallelismCompensationEnabled) {
+        return body()
+    }
     // CoroutineScheduler.Worker implements ParallelismCompensation
     val worker = Thread.currentThread() as? ParallelismCompensation
         ?: return body()
