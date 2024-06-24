@@ -4,13 +4,13 @@ import kotlinx.coroutines.*
 import org.junit.*
 import java.util.concurrent.atomic.*
 
-class RunBlockingCoroutineDispatcherTest : SchedulerTestBase() {
+class RunBlockingWithParallelismCompensationCoroutineDispatcherTest : SchedulerTestBase() {
     @Test
     fun testRecursiveRunBlockingCanExceedDefaultDispatcherLimit() {
         val maxDepth = CORES_COUNT * 3 + 3
         fun body(depth: Int) {
             if (depth == maxDepth) return
-            runBlocking(Dispatchers.Default) {
+            runBlockingWithParallelismCompensation(Dispatchers.Default) {
                 launch(Dispatchers.Default) {
                     body(depth + 1)
                 }
@@ -31,13 +31,13 @@ class RunBlockingCoroutineDispatcherTest : SchedulerTestBase() {
         val barrier = CompletableDeferred<Unit>()
         val count = AtomicInteger(0)
         fun blockingCode() {
-            runBlocking {
+            runBlockingWithParallelismCompensation {
                 count.incrementAndGet()
                 barrier.await()
                 count.decrementAndGet()
             }
         }
-        runBlocking {
+        runBlockingWithParallelismCompensation {
             repeat(threadsToReach) {
                 launch(targetDispatcher) {
                     blockingCode()

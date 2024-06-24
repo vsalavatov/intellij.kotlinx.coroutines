@@ -49,6 +49,21 @@ public actual fun <T> runBlocking(context: CoroutineContext, block: suspend Coro
     contract {
         callsInPlace(block, InvocationKind.EXACTLY_ONCE)
     }
+    return runBlocking(context, compensateParallelism = false, block)
+}
+
+@Throws(InterruptedException::class)
+internal fun <T> runBlockingWithParallelismCompensation(context: CoroutineContext = EmptyCoroutineContext, block: suspend CoroutineScope.() -> T): T {
+    contract {
+        callsInPlace(block, InvocationKind.EXACTLY_ONCE)
+    }
+    return runBlocking(context, compensateParallelism = true, block)
+}
+
+private fun <T> runBlocking(context: CoroutineContext, compensateParallelism: Boolean, block: suspend CoroutineScope.() -> T): T {
+    contract {
+        callsInPlace(block, InvocationKind.EXACTLY_ONCE)
+    }
     val currentThread = Thread.currentThread()
     val contextInterceptor = context[ContinuationInterceptor]
     val eventLoop: EventLoop?
@@ -64,7 +79,7 @@ public actual fun <T> runBlocking(context: CoroutineContext, block: suspend Coro
             ?: ThreadLocalEventLoop.currentOrNull()
         newContext = GlobalScope.newCoroutineContext(context)
     }
-    val coroutine = BlockingCoroutine<T>(newContext, currentThread, eventLoop)
+    val coroutine = BlockingCoroutine<T>(newContext, currentThread, eventLoop, compensateParallelism)
     coroutine.start(CoroutineStart.DEFAULT, coroutine, block)
     return coroutine.joinBlocking()
 }
@@ -72,7 +87,8 @@ public actual fun <T> runBlocking(context: CoroutineContext, block: suspend Coro
 private class BlockingCoroutine<T>(
     parentContext: CoroutineContext,
     private val blockedThread: Thread,
-    private val eventLoop: EventLoop?
+    private val eventLoop: EventLoop?,
+    private val compensateParallelism: Boolean,
 ) : AbstractCoroutine<T>(parentContext, true, true) {
 
     override val isScopedCoroutine: Boolean get() = true
@@ -96,7 +112,11 @@ private class BlockingCoroutine<T>(
                     // note: process next even may loose unpark flag, so check if completed before parking
                     if (isCompleted) break
                     if (parkNanos > 0) {
-                        withCompensatedParallelism {
+                        if (compensateParallelism) {
+                            withCompensatedParallelism {
+                                parkNanos(this, parkNanos)
+                            }
+                        } else {
                             parkNanos(this, parkNanos)
                         }
                     }
