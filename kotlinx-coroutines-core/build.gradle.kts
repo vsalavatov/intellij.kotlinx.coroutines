@@ -169,7 +169,8 @@ val jvmTest by tasks.getting(Test::class) {
         // is invoked by IntelliJ IDEA since we need to pass
         // system properties for Lincheck and stress tests.
         // TODO Remove once IDEA is smart enough to select between `jvmTest`/`jvmStressTest`/`jvmLincheckTest` #KTIJ-599
-        systemProperty("java.security.manager", "kotlinx.coroutines.TestSecurityManager")
+        // TODO figure out why teamcity jobs fail with NCDFE: kotlin/text/StringsKt with this security manager
+        //systemProperty("java.security.manager", "kotlinx.coroutines.TestSecurityManager")
     }
     // 'stress' is required to be able to run all subpackage tests like ":jvmTests --tests "*channels*" -Pstress=true"
     if (!Idea.active && rootProject.properties["stress"] == null) {
