@@ -4,11 +4,14 @@
 package kotlinx.coroutines.internal.intellij
 
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.internal.softLimitedParallelism as softLimitedParallelismImpl
 import kotlinx.coroutines.internal.SoftLimitedDispatcher
+import kotlinx.coroutines.runBlockingWithParallelismCompensation as runBlockingWithParallelismCompensationImpl
 import kotlinx.coroutines.Dispatchers
 import kotlin.coroutines.*
+import kotlin.jvm.Throws
 
 internal val currentContextThreadLocal : ThreadLocal<CoroutineContext?> = ThreadLocal.withInitial { null }
 
@@ -28,6 +31,14 @@ public object IntellijCoroutines {
     public fun currentThreadCoroutineContext(): CoroutineContext? {
         return currentContextThreadLocal.get()
     }
+
+    /**
+     * An analogue of [runBlocking][kotlinx.coroutines.runBlocking] that [compensates parallelism][kotlinx.coroutines.scheduling.withCompensatedParallelism]
+     * while the coroutine is not complete and the associated event loop has no immediate work available.
+     */
+    @Throws(InterruptedException::class)
+    public fun <T> runBlockingWithParallelismCompensation(context: CoroutineContext, block: suspend CoroutineScope.() -> T): T =
+        runBlockingWithParallelismCompensationImpl(context, block)
 
     /**
      * Constructs a [SoftLimitedDispatcher] from the specified [CoroutineDispatcher].
