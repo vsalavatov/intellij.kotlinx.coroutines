@@ -10,7 +10,7 @@ import java.util.*
 import java.util.concurrent.*
 
 @RunWith(Parameterized::class)
-class RunBlockingCoroutineSchedulerLivenessStressTest(private val yieldMask: Int) : SchedulerTestBase() {
+class RunBlockingWithParallelismCompensationCoroutineSchedulerLivenessStressTest(private val yieldMask: Int) : SchedulerTestBase() {
     init {
         corePoolSize = 1
     }
@@ -53,7 +53,7 @@ class RunBlockingCoroutineSchedulerLivenessStressTest(private val yieldMask: Int
             val barrier2 = CompletableDeferred<Unit>()
             val blocking = launch(targetDispatcher) {
                 barrier.await()
-                runBlocking {
+                runBlockingWithParallelismCompensation {
                     if ((yieldMask and 1) != 0) yield()
                     barrier2.await()
                     if ((yieldMask and 2) != 0) yield()
