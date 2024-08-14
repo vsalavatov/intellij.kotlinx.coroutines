@@ -321,7 +321,7 @@ private class StateFlowImpl<T>(
             val oldState = _state.value
             if (expectedState != null && oldState != expectedState) return false // CAS support
             if (oldState == newState) return true // Don't do anything if value is not changing, but CAS -> true
-            _state.value = newState
+            updateInner(newState)
             curSequence = sequence
             if (curSequence and 1 == 0) { // even sequence means quiescent state flow (no ongoing update)
                 curSequence++ // make it odd
@@ -357,6 +357,11 @@ private class StateFlowImpl<T>(
         }
     }
 
+    // Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
+    private fun updateInner(newState: Any) {
+        _state.value = newState
+    }
+
     override val replayCache: List<T>
         get() = listOf(value)
 
@@ -389,7 +394,7 @@ private class StateFlowImpl<T>(
                 collectorJob?.ensureActive()
                 // Conflate value emissions using equality
                 if (oldState == null || oldState != newState) {
-                    collector.emit(NULL.unbox(newState))
+                    emitInner(collector, newState)
                     oldState = newState
                 }
                 // Note: if awaitPending is cancelled, then it bails out of this loop and calls freeSlot
@@ -400,6 +405,11 @@ private class StateFlowImpl<T>(
         } finally {
             freeSlot(slot)
         }
+    }
+
+    // Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
+    private suspend fun emitInner(collector: FlowCollector<T>, newState: Any) {
+        collector.emit(NULL.unbox(newState))
     }
 
     override fun createSlot() = StateFlowSlot()
