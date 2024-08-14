@@ -364,7 +364,7 @@ internal open class SharedFlowImpl<T>(
             val result = ArrayList<T>(replaySize)
             val buffer = buffer!! // must be allocated, because replaySize > 0
             @Suppress("UNCHECKED_CAST")
-            for (i in 0 until replaySize) result += buffer.getBufferAt(replayIndex + i) as T
+            for (i in 0 until replaySize) result += unwrapInternal(buffer.getBufferAt(replayIndex + i)) as T
             result
         }
 
@@ -373,7 +373,7 @@ internal open class SharedFlowImpl<T>(
      */
     @Suppress("UNCHECKED_CAST")
     protected val lastReplayedLocked: T
-        get() = buffer!!.getBufferAt(replayIndex + replaySize - 1) as T
+        get() = unwrapInternal(buffer!!.getBufferAt(replayIndex + replaySize - 1)) as T
 
     @Suppress("UNCHECKED_CAST")
     override suspend fun collect(collector: FlowCollector<T>): Nothing {
@@ -389,11 +389,16 @@ internal open class SharedFlowImpl<T>(
                     awaitValue(slot) // await signal that the new value is available
                 }
                 collectorJob?.ensureActive()
-                collector.emit(newValue as T)
+                emitInner(collector, newValue as T)
             }
         } finally {
             freeSlot(slot)
         }
+    }
+
+    // Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
+    private suspend fun emitInner(collector: FlowCollector<T>, value: T) {
+        collector.emit(unwrapInternal(value))
     }
 
     override fun tryEmit(value: T): Boolean {
@@ -469,8 +474,16 @@ internal open class SharedFlowImpl<T>(
         minCollectorIndex = newHead
     }
 
-    // enqueues item to buffer array, caller shall increment either bufferSize or queueSize
     private fun enqueueLocked(item: Any?) {
+        enqueueLockedInner(wrapInternal(item))
+    }
+
+    private fun enqueueEmitterLocked(emitter: Emitter) {
+        enqueueLockedInner(emitter)
+    }
+
+    // enqueues item to buffer array, caller shall increment either bufferSize or queueSize
+    private fun enqueueLockedInner(item: Any?) {
         val curSize = totalSize
         val buffer = when (val curBuffer = buffer) {
             null -> growBuffer(null, 0, 2)
@@ -500,8 +513,8 @@ internal open class SharedFlowImpl<T>(
                 return@lock null
             }
             // add suspended emitter to the buffer
-            Emitter(this, head + totalSize, value, cont).also {
-                enqueueLocked(it)
+            Emitter(this, head + totalSize, wrapInternal(value), cont).also {
+                enqueueEmitterLocked(it)
                 queueSize++ // added to queue of waiting emitters
                 // synchronous shared flow might rendezvous with waiting emitter
                 if (bufferCapacity == 0) resumes = findSlotsToResumeLocked(resumes)
