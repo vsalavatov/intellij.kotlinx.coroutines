@@ -389,16 +389,11 @@ internal open class SharedFlowImpl<T>(
                     awaitValue(slot) // await signal that the new value is available
                 }
                 collectorJob?.ensureActive()
-                emitInner(collector, newValue as T)
+                collector.emitInternal(newValue as T)
             }
         } finally {
             freeSlot(slot)
         }
-    }
-
-    // Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
-    private suspend fun emitInner(collector: FlowCollector<T>, value: T) {
-        collector.emit(unwrapInternal(value))
     }
 
     override fun tryEmit(value: T): Boolean {

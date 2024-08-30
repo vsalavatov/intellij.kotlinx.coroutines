@@ -29,9 +29,7 @@ private suspend fun <T> FlowCollector<T>.emitAllImpl(channel: ReceiveChannel<T>,
     ensureActive()
     var cause: Throwable? = null
     try {
-        for (element in channel) {
-            emit(element)
-        }
+        channel.emitAll(this)
     } catch (e: Throwable) {
         cause = e
         throw e

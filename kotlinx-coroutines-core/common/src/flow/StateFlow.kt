@@ -394,7 +394,7 @@ private class StateFlowImpl<T>(
                 collectorJob?.ensureActive()
                 // Conflate value emissions using equality
                 if (oldState == null || oldState != newState) {
-                    emitInner(collector, newState)
+                    collector.emitInternal(newState)
                     oldState = newState
                 }
                 // Note: if awaitPending is cancelled, then it bails out of this loop and calls freeSlot
@@ -405,11 +405,6 @@ private class StateFlowImpl<T>(
         } finally {
             freeSlot(slot)
         }
-    }
-
-    // Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
-    private suspend fun emitInner(collector: FlowCollector<T>, newState: Any) {
-        collector.emit(NULL.unbox(newState))
     }
 
     override fun createSlot() = StateFlowSlot()
