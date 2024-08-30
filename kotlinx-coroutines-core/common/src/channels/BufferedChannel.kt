@@ -7,6 +7,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ChannelResult.Companion.closed
 import kotlinx.coroutines.channels.ChannelResult.Companion.failure
 import kotlinx.coroutines.channels.ChannelResult.Companion.success
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.internal.*
 import kotlinx.coroutines.internal.*
 import kotlinx.coroutines.selects.*
@@ -1550,6 +1551,13 @@ internal open class BufferedChannel<E>(
 
     override fun iterator(): ChannelIterator<E> = BufferedChannelIterator()
 
+    override suspend fun emitAll(collector: FlowCollector<E>) {
+        val iterator = iterator() as BufferedChannel.BufferedChannelIterator
+        while (iterator.hasNext()) {
+            collector.emitInternal(iterator.nextInternal())
+        }
+    }
+
     /**
      * The key idea is that an iterator is a special receiver type,
      * which should be resumed differently to [receive] and [onReceive]
@@ -1601,7 +1609,7 @@ internal open class BufferedChannel<E>(
                 // Also, inform the `BufferedChannel` extensions that
                 // the synchronization of this receive operation is completed.
                 onElementRetrieved = { element ->
-                    this.receiveResult = element
+                    saveReceiveResult(element)
                     true
                 },
                 // As no waiter is provided, suspension is impossible.
@@ -1639,7 +1647,7 @@ internal open class BufferedChannel<E>(
                 // In case `onUndeliveredElement` is present, we must
                 // invoke it in the latter case.
                 onElementRetrieved = { element ->
-                    this.receiveResult = element
+                    saveReceiveResult(element)
                     this.continuation = null
                     cont.resume(true, onUndeliveredElement?.bindCancellationFun(element, cont.context))
                 },
@@ -1669,8 +1677,17 @@ internal open class BufferedChannel<E>(
             }
         }
 
-        @Suppress("UNCHECKED_CAST")
         override fun next(): E {
+            return unwrapInternal(nextInternal())
+        }
+
+        /**
+         * Result may be wrapped by debugger agent; use this method only with [unwrapInternal] or [emitInternal]!
+         *
+         * @see [next], [emitAll]
+         */
+        @Suppress("UNCHECKED_CAST")
+        internal fun nextInternal(): E {
             // Read the already received result, or [NO_RECEIVE_RESULT] if [hasNext] has not been invoked yet.
             val result = receiveResult
             check(result !== NO_RECEIVE_RESULT) { "`hasNext()` has not been invoked" }
@@ -1687,11 +1704,15 @@ internal open class BufferedChannel<E>(
             val cont = this.continuation!!
             this.continuation = null
             // Store the retrieved element in `receiveResult`.
-            this.receiveResult = element
+            saveReceiveResult(element)
             // Try to resume this `hasNext()`. Importantly, the receiver coroutine
             // may be cancelled after it is successfully resumed but not dispatched yet.
             // In case `onUndeliveredElement` is specified, we need to invoke it in the latter case.
             return cont.tryResume0(true, onUndeliveredElement?.bindCancellationFun(element, cont.context))
+        }
+
+        private fun saveReceiveResult(element: E) {
+            this.receiveResult = wrapInternal(element)
         }
 
         fun tryResumeHasNextOnClosedChannel() {

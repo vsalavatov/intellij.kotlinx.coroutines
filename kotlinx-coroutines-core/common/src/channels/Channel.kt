@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.Channel.Factory.CHANNEL_DEFAULT_CAPACITY
 import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
 import kotlinx.coroutines.channels.Channel.Factory.RENDEZVOUS
 import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.internal.*
 import kotlinx.coroutines.selects.*
 import kotlin.contracts.*
@@ -287,6 +288,15 @@ public interface ReceiveChannel<out E> {
      * throws the original [close][SendChannel.close] cause exception if the channel has _failed_.
      */
     public operator fun iterator(): ChannelIterator<E>
+
+    /**
+     * Emits all elements of this channel using [collector].
+     */
+    public suspend fun emitAll(collector: FlowCollector<E>) {
+        for (element in this) {
+            collector.emit(element)
+        }
+    }
 
     /**
      * Cancels reception of remaining elements from this channel with an optional [cause].
