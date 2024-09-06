@@ -15,21 +15,8 @@ internal class FlowValueWrapperInternal<T>(val value: T)
 internal fun <T> wrapInternal(value: T): T = value
 internal fun <T> unwrapInternal(value: T): T = value
 
-// debugger agent transforms wrapInternal so it returns wrapInternalDebuggerCaptureX(value) instead of just value.
-// "X" may be Strict or Lenient, debugger agent picks one depending on its arguments.
-// Both versions are aimed at handling double wrapping, which is always an error;
-// a lenient version swallows it, allowing the application to proceed normally
-// at the cost of not working async stack traces in the place;
-// a strict version throws an exception so that the issue could be traced at its earliest point
-
-private fun wrapInternalDebuggerCaptureStrict(value: Any?): Any {
-    if (value is FlowValueWrapperInternal<*>) {
-        throw DoubleWrappingException("Double-wrapping detected; failing fast. This should never happen!")
-    }
-    return FlowValueWrapperInternal(value)
-}
-
-private fun wrapInternalDebuggerCaptureLenient(value: Any?): Any {
+// debugger agent transforms wrapInternal so it returns wrapInternalDebuggerCapture(value) instead of just value.
+private fun wrapInternalDebuggerCapture(value: Any?): Any {
     if (value is FlowValueWrapperInternal<*>) {
         return value
     }
@@ -50,5 +37,3 @@ private fun unwrapInternalDebuggerCapture(value: Any?): Any? {
 internal suspend fun <T> FlowCollector<T>.emitInternal(value: Any?) {
     emit(NULL.unbox(unwrapInternal(value)))
 }
-
-private class DoubleWrappingException(message: String) : RuntimeException(message)
