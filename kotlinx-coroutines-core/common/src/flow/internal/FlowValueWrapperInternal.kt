@@ -36,5 +36,10 @@ private fun unwrapInternalDebuggerCapture(value: Any?): Any? {
 
 // Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
 internal suspend fun <T> FlowCollector<T>.emitInternal(value: Any?) {
-    emit(unwrapTyped<T>(value))
+    debuggerCapture<T, Unit>(value) { emit(it) }
+}
+
+// Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
+internal suspend fun <Unwrapped, R> debuggerCapture(value: Any?, block: suspend (Unwrapped) -> R): R {
+    return block(unwrapTyped<Unwrapped>(value))
 }
