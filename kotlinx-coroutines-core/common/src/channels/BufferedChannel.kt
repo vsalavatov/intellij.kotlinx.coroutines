@@ -1513,7 +1513,7 @@ internal open class BufferedChannel<E>(
     private fun registerSelectForReceive(select: SelectInstance<*>, ignoredParam: Any?) =
         receiveImpl( // <-- this is an inline function
             waiter = select,
-            onElementRetrieved = { elem -> select.selectInRegistrationPhase(unwrapTyped(elem)) },
+            onElementRetrieved = { elem -> select.selectInRegistrationPhase(elem) },
             onSuspend = { _, _, _ -> },
             onClosed = { onClosedSelectOnReceive(select) }
         )

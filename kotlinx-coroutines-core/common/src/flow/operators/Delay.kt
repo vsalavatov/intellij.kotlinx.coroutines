@@ -229,7 +229,7 @@ private fun <T> Flow<T>.debounceInternal(timeoutMillisSelector: (T) -> Long): Fl
                 }
                 values.onReceiveCatching { value ->
                     value
-                        .onSuccess { lastValue = it }
+                        .onSuccess { lastValue = wrapInternal(it) }
                         .onFailure {
                             it?.let { throw it }
                             // If closed normally, emit the latest value
@@ -278,7 +278,7 @@ public fun <T> Flow<T>.sample(periodMillis: Long): Flow<T> {
             select<Unit> {
                 values.onReceiveCatching { result ->
                     result
-                        .onSuccess { lastValue = it }
+                        .onSuccess { lastValue = wrapInternal(it) }
                         .onFailure {
                             it?.let { throw it }
                             ticker.cancel(ChildCancelledException())
