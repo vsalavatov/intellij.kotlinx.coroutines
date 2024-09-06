@@ -665,7 +665,7 @@ internal open class BufferedChannel<E>(
     protected open fun onReceiveDequeued() {}
 
     override suspend fun receive(): E =
-        receiveImpl( // <-- this is an inline function
+        receiveImpl<E>( // <-- this is an inline function
             // Do not create a continuation until it is required;
             // it is created later via [onNoWaiterSuspend], if needed.
             waiter = null,
@@ -674,7 +674,7 @@ internal open class BufferedChannel<E>(
             // Also, inform `BufferedChannel` extensions that
             // synchronization of this receive operation is completed.
             onElementRetrieved = { element ->
-                return element
+                return unwrapTyped<E>(element)
             },
             // As no waiter is provided, suspension is impossible.
             onSuspend = { _, _, _ -> error("unexpected") },
@@ -683,7 +683,7 @@ internal open class BufferedChannel<E>(
             // If `receive()` decides to suspend, the corresponding
             // `suspend` function that creates a continuation is called.
             // The tail-call optimization is applied here.
-            onNoWaiterSuspend = { segm, i, r -> receiveOnNoWaiterSuspend(segm, i, r) }
+            onNoWaiterSuspend = { segm, i, r -> unwrapTyped(receiveOnNoWaiterSuspend(segm, i, r)) }
         )
 
     private suspend fun receiveOnNoWaiterSuspend(
@@ -706,7 +706,7 @@ internal open class BufferedChannel<E>(
             // not dispatched yet. In case `onUndeliveredElement` is
             // specified, we need to invoke it in the latter case.
             onElementRetrieved = { element ->
-                val onCancellation = onUndeliveredElement?.bindCancellationFun(element, cont.context)
+                val onCancellation = onUndeliveredElement?.bindCancellationFun(unwrapTyped(element), cont.context)
                 cont.resume(element, onCancellation)
             },
             onClosed = { onClosedReceiveOnNoWaiterSuspend(cont) },
@@ -733,11 +733,11 @@ internal open class BufferedChannel<E>(
         receiveImpl( // <-- this is an inline function
             waiter = null,
             onElementRetrieved = { element ->
-                success(element)
+                success(unwrapTyped(element))
             },
             onSuspend = { _, _, _ -> error("unexpected") },
             onClosed = { closed(closeCause) },
-            onNoWaiterSuspend = { segm, i, r -> receiveCatchingOnNoWaiterSuspend(segm, i, r) }
+            onNoWaiterSuspend = { segm, i, r -> unwrapTyped(receiveCatchingOnNoWaiterSuspend(segm, i, r)) }
         )
 
     private suspend fun receiveCatchingOnNoWaiterSuspend(
@@ -750,7 +750,8 @@ internal open class BufferedChannel<E>(
             segment, index, r,
             waiter = waiter,
             onElementRetrieved = { element ->
-                cont.resume(success(element), onUndeliveredElement?.bindCancellationFun(element, cont.context))
+                val unwrapped = unwrapTyped<E>(element)
+                cont.resume(success(unwrapped), onUndeliveredElement?.bindCancellationFun(unwrapped, cont.context))
             },
             onClosed = { onClosedReceiveCatchingOnNoWaiterSuspend(cont) }
         )
@@ -783,7 +784,7 @@ internal open class BufferedChannel<E>(
             // Store an already interrupted receiver in case of suspension.
             waiter = INTERRUPTED_RCV,
             // Finish when an element is successfully retrieved.
-            onElementRetrieved = { element -> success(element) },
+            onElementRetrieved = { element -> success(unwrapTyped(element)) },
             // On suspension, the `INTERRUPTED_RCV` token has been
             // installed, and this `tryReceive()` must fail.
             onSuspend = { segm, _, globalIndex ->
@@ -847,7 +848,7 @@ internal open class BufferedChannel<E>(
                     // Clean the reference to the previous segment.
                     segment.cleanPrev()
                     @Suppress("UNCHECKED_CAST")
-                    onUndeliveredElement?.callUndeliveredElementCatchingException(updCellResult as E)?.let { throw it }
+                    onUndeliveredElement?.callUndeliveredElementCatchingException(unwrapTyped(updCellResult))?.let { throw it }
                 }
             }
         }
@@ -865,7 +866,7 @@ internal open class BufferedChannel<E>(
         /* This lambda is invoked when an element has been
         successfully retrieved, either from the buffer or
         by making a rendezvous with a suspended sender. */
-        onElementRetrieved: (element: E) -> R,
+        onElementRetrieved: (element: Any?) -> R,
         /* This lambda is called when the operation suspends in the cell
         specified by the segment and its global and in-segment indices. */
         onSuspend: (segm: ChannelSegment<E>, i: Int, r: Long) -> R,
@@ -935,7 +936,7 @@ internal open class BufferedChannel<E>(
                     // Clean the reference to the previous segment before finishing.
                     segment.cleanPrev()
                     @Suppress("UNCHECKED_CAST")
-                    onElementRetrieved(updCellResult as E)
+                    onElementRetrieved(updCellResult)
                 }
             }
         }
@@ -953,7 +954,7 @@ internal open class BufferedChannel<E>(
         /* This lambda is invoked when an element has been
         successfully retrieved, either from the buffer or
         by making a rendezvous with a suspended sender. */
-        onElementRetrieved: (element: E) -> Unit,
+        onElementRetrieved: (element: Any?) -> Unit,
         /* This lambda is called when the channel is observed
         in the closed state and no waiting senders is found,
         which means that it is closed for receiving. */
@@ -1512,7 +1513,7 @@ internal open class BufferedChannel<E>(
     private fun registerSelectForReceive(select: SelectInstance<*>, ignoredParam: Any?) =
         receiveImpl( // <-- this is an inline function
             waiter = select,
-            onElementRetrieved = { elem -> select.selectInRegistrationPhase(elem) },
+            onElementRetrieved = { elem -> select.selectInRegistrationPhase(unwrapTyped(elem)) },
             onSuspend = { _, _, _ -> },
             onClosed = { onClosedSelectOnReceive(select) }
         )
@@ -1609,7 +1610,7 @@ internal open class BufferedChannel<E>(
                 // Also, inform the `BufferedChannel` extensions that
                 // the synchronization of this receive operation is completed.
                 onElementRetrieved = { element ->
-                    saveReceiveResult(element)
+                    this.receiveResult = element
                     true
                 },
                 // As no waiter is provided, suspension is impossible.
@@ -1647,9 +1648,9 @@ internal open class BufferedChannel<E>(
                 // In case `onUndeliveredElement` is present, we must
                 // invoke it in the latter case.
                 onElementRetrieved = { element ->
-                    saveReceiveResult(element)
+                    this.receiveResult = element
                     this.continuation = null
-                    cont.resume(true, onUndeliveredElement?.bindCancellationFun(element, cont.context))
+                    cont.resume(true, onUndeliveredElement?.bindCancellationFun(unwrapTyped(element), cont.context))
                 },
                 onClosed = { onClosedHasNextNoWaiterSuspend() }
             )
@@ -1704,15 +1705,11 @@ internal open class BufferedChannel<E>(
             val cont = this.continuation!!
             this.continuation = null
             // Store the retrieved element in `receiveResult`.
-            saveReceiveResult(element)
+            this.receiveResult = wrapInternal(element)
             // Try to resume this `hasNext()`. Importantly, the receiver coroutine
             // may be cancelled after it is successfully resumed but not dispatched yet.
             // In case `onUndeliveredElement` is specified, we need to invoke it in the latter case.
             return cont.tryResume0(true, onUndeliveredElement?.bindCancellationFun(element, cont.context))
-        }
-
-        private fun saveReceiveResult(element: E) {
-            this.receiveResult = wrapInternal(element)
         }
 
         fun tryResumeHasNextOnClosedChannel() {
@@ -2783,16 +2780,17 @@ internal class ChannelSegment<E>(id: Long, prev: ChannelSegment<E>?, channel: Bu
     }
 
     @Suppress("UNCHECKED_CAST")
-    internal fun getElement(index: Int) = data[index * 2].value as E
+    internal fun getElement(index: Int) = unwrapInternal(data[index * 2].value) as E
 
-    internal fun retrieveElement(index: Int): E = getElement(index).also { cleanElement(index) }
+    @Suppress("UNCHECKED_CAST")
+    internal fun retrieveElement(index: Int): E = (data[index * 2].value as E).also { cleanElement(index) }
 
     internal fun cleanElement(index: Int) {
-        setElementLazy(index, null)
+        data[index * 2].lazySet(null)
     }
 
     private fun setElementLazy(index: Int, value: Any?) {
-        data[index * 2].lazySet(value)
+        data[index * 2].lazySet(wrapInternal(value))
     }
 
     // ######################################
