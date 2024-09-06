@@ -72,11 +72,7 @@ Some logic related to instrumentation was extracted to separate methods so that 
 
 - `kotlinx.coroutines.flow.internal.FlowValueWrapperInternal` -- wrapper class used to create a unique object for the debugger agent
 - `kotlinx.coroutines.flow.internal.FlowValueWrapperInternalKt.wrapInternal` -- returns passed argument by default; the agent instruments it to call `wrapInternalDebuggerCapture` instead
-- `kotlinx.coroutines.flow.internal.FlowValueWrapperInternalKt.wrapInternalDebuggerCaptureX` -- wraps passed arguments into a `FlowValueWrapperInternal`; only used after transformation.
-  `X` may mean `Strict` or `Lenient`. Both methods handle double-wrapping, which is always an error that is hard to investigate if it arises naturally.
-    - `Strict` throws an exception, thus allowing fail-fast strategy
-    - `Lenient` returns its argument without wrapping it again
-  Debugger agent decides which version to use based on IDE settings.
+- `kotlinx.coroutines.flow.internal.FlowValueWrapperInternalKt.wrapInternalDebuggerCapture` -- wraps passed arguments into a `FlowValueWrapperInternal`; only used after transformation.
 - `kotlinx.coroutines.flow.internal.FlowValueWrapperInternalKt.unwrapInternal` -- returns passed argument by default; the agent instruments it to call `unwrapInternalDebuggerCapture` instead
 - `kotlinx.coroutines.flow.internal.FlowValueWrapperInternalKt.unwrapInternalDebuggerCapture` -- unwraps passed argument so it returns the original value; only used after transformation
 - `kotlinx.coroutines.flow.internal.FlowValueWrapperInternalKt.emitInternal(FlowCollector, value)` -- common insertion point for a debugger agent; simplifies instrumentation; the value is always being unwrapped inside
