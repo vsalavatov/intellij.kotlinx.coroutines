@@ -79,6 +79,10 @@ Some logic related to instrumentation was extracted to separate methods so that 
 
 One internal method was added to `BufferedChannel`: `emitAllInternal`. This method ensures the value will be unwrapped in an insertion point.
 
+One internal method was added to `flow/Channels.kt`: `emitAllInternal`. It emits all values, like usual, but also considers wrapping/unwrapping supported in `BufferedChannel`.
+
+One internal method was added to `ChannelCoroutine`: `emitAllInternal` serves to bridge its delegate and the method above.
+
 One internal method was added to `BufferedChannelIterator`: `nextInternal` -- same as `next` but may return a wrapped value. It should only be used with a function that is capable of unwrapping the value (see `BufferedChannel.emitAll` and `BufferedChannelIterator.next`), so there's a guarantee a wrapped value will always unwrap before emitting.
 
 Why not just let `next` return a maybe wrapped value? That's because it is heavily used outside a currently supported scope. For example, one may just indirectly call it from a for-loop. In this case, unwrapping will never happen, and a user will get a handful of `ClassCastException`s.
