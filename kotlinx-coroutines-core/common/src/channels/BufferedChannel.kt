@@ -1552,7 +1552,7 @@ internal open class BufferedChannel<E>(
 
     override fun iterator(): ChannelIterator<E> = BufferedChannelIterator()
 
-    override suspend fun emitAll(collector: FlowCollector<E>) {
+    internal suspend fun emitAllInternal(collector: FlowCollector<E>) {
         val iterator = iterator() as BufferedChannel.BufferedChannelIterator
         while (iterator.hasNext()) {
             collector.emitInternal(iterator.nextInternal())

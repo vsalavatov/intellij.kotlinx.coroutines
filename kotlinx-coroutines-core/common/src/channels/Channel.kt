@@ -290,15 +290,6 @@ public interface ReceiveChannel<out E> {
     public operator fun iterator(): ChannelIterator<E>
 
     /**
-     * Emits all elements of this channel using [collector].
-     */
-    public suspend fun emitAll(collector: FlowCollector<E>) {
-        for (element in this) {
-            collector.emit(element)
-        }
-    }
-
-    /**
      * Cancels reception of remaining elements from this channel with an optional [cause].
      * This function closes the channel and removes all buffered sent elements from it.
      *
