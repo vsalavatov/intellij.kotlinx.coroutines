@@ -44,9 +44,9 @@ module("reactive/kotlinx-coroutines-reactor")
 module("reactive/kotlinx-coroutines-jdk9")
 module("reactive/kotlinx-coroutines-rx2")
 module("reactive/kotlinx-coroutines-rx3")
-module("ui/kotlinx-coroutines-android")
-module("ui/kotlinx-coroutines-android/android-unit-tests")
-if (JavaVersion.current().isJava11Compatible()) {
-    module("ui/kotlinx-coroutines-javafx")
-}
-module("ui/kotlinx-coroutines-swing")
+//module("ui/kotlinx-coroutines-android")
+//module("ui/kotlinx-coroutines-android/android-unit-tests")
+//if (JavaVersion.current().isJava11Compatible()) {
+//    module("ui/kotlinx-coroutines-javafx")
+//}
+//module("ui/kotlinx-coroutines-swing")

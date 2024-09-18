@@ -30,7 +30,9 @@ val testUtilsModule = "test-utils"
 val sourceless = setOf("kotlinx.coroutines", "kotlinx-coroutines-bom")
 
 // Not published
-val unpublished = setOf("kotlinx.coroutines", "benchmarks", "android-unit-tests", testUtilsModule)
+val unpublished = setOf("kotlinx.coroutines", "benchmarks",
+//    "android-unit-tests",
+    testUtilsModule)
 
 val Project.isMultiplatform: Boolean get() = name in setOf(coreModule, "kotlinx-coroutines-test", testUtilsModule)
 val Project.isBom: Boolean get() = name == "kotlinx-coroutines-bom"

@@ -4,6 +4,7 @@ import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.internal.*
 import java.io.*
+import java.lang.reflect.Constructor
 import java.util.concurrent.*
 import java.util.concurrent.locks.*
 import kotlin.jvm.internal.Ref.ObjectRef
@@ -540,7 +541,10 @@ internal class CoroutineScheduler(
         return localQueue.add(task, fair = tailDispatch)
     }
 
-    private fun currentWorker(): Worker? = (Thread.currentThread() as? Worker)?.takeIf { it.scheduler == this }
+    private fun currentWorker(): Worker? {
+        val workerThread = getCurrentCarrierThread() as? Worker
+        return workerThread?.takeIf { it.scheduler == this }
+    }
 
     /**
      * Returns a string identifying the state of this scheduler for nicer debugging.
@@ -1149,3 +1153,13 @@ internal fun isSchedulerWorker(thread: Thread) = thread is CoroutineScheduler.Wo
 @JvmName("mayNotBlock")
 internal fun mayNotBlock(thread: Thread) = thread is CoroutineScheduler.Worker &&
     thread.state == CoroutineScheduler.WorkerState.CPU_ACQUIRED
+
+internal val getCurrentCarrierThread: () -> Thread? by lazy {
+    val threadClass = Thread::class.java
+    val getCurrentCarrierThread = threadClass.declaredMethods.find { it.name == "currentCarrierThread" }
+    if (getCurrentCarrierThread == null) {
+        return@lazy { Thread.currentThread() }
+    }
+    getCurrentCarrierThread.isAccessible = true
+    { getCurrentCarrierThread.invoke(null) as Thread? }
+}

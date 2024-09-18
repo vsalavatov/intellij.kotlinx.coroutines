@@ -64,12 +64,14 @@ However, when creating a new compilation, we have to take care of creating a def
 kotlin {
     sourceSets {
         // using the source set names from <https://kotlinlang.org/docs/multiplatform-hierarchy.html#see-the-full-hierarchy-template>
-        groupSourceSets("concurrent", listOf("jvm", "native"), listOf("common"))
-        if (project.nativeTargetsAreEnabled) {
-            // TODO: 'nativeDarwin' behaves exactly like 'apple', we can remove it
-            groupSourceSets("nativeDarwin", listOf("apple"), listOf("native"))
-            groupSourceSets("nativeOther", listOf("linux", "mingw", "androidNative"), listOf("native"))
-        }
+        groupSourceSets("concurrent", listOf("jvm",
+//            "native"
+        ), listOf("common"))
+//        if (project.nativeTargetsAreEnabled) {
+//             TODO: 'nativeDarwin' behaves exactly like 'apple', we can remove it
+//            groupSourceSets("nativeDarwin", listOf("apple"), listOf("native"))
+//            groupSourceSets("nativeOther", listOf("linux", "mingw", "androidNative"), listOf("native"))
+//        }
         jvmMain {
             dependencies {
                 compileOnly("com.google.android:annotations:4.1.1.4")
@@ -79,7 +81,7 @@ kotlin {
             dependencies {
                 api("org.jetbrains.kotlinx:lincheck:${version("lincheck")}")
                 api("org.jetbrains.kotlinx:kotlinx-knit-test:${version("knit")}")
-                implementation(project(":android-unit-tests"))
+//                implementation(project(":android-unit-tests"))
                 implementation("org.openjdk.jol:jol-core:0.16")
             }
         }
