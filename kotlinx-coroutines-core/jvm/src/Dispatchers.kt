@@ -2,6 +2,9 @@ package kotlinx.coroutines
 
 import kotlinx.coroutines.internal.*
 import kotlinx.coroutines.scheduling.*
+import java.lang.reflect.Constructor
+import java.util.concurrent.Executor
+import java.util.concurrent.ThreadFactory
 import kotlin.coroutines.*
 
 /**
@@ -9,12 +12,15 @@ import kotlin.coroutines.*
  */
 public const val IO_PARALLELISM_PROPERTY_NAME: String = "kotlinx.coroutines.io.parallelism"
 
+public const val DISPATCHERS_DEFAULT_DISPATCH_VIRTUAL_THREADS: String = "kotlinx.coroutines.dispatchers.default.vthreads"
+public const val DISPATCHERS_IO_DISPATCH_VIRTUAL_THREADS: String = "kotlinx.coroutines.dispatchers.io.vthreads"
+
 /**
  * Groups various implementations of [CoroutineDispatcher].
  */
 public actual object Dispatchers {
     @JvmStatic
-    public actual val Default: CoroutineDispatcher = DefaultScheduler
+    public actual val Default: CoroutineDispatcher = DefaultScheduler.wrapVirtual(DISPATCHERS_DEFAULT_DISPATCH_VIRTUAL_THREADS)
 
     @JvmStatic
     public actual val Main: MainCoroutineDispatcher get() = MainDispatcherLoader.dispatcher
@@ -62,7 +68,7 @@ public actual object Dispatchers {
      * during operations over IO dispatcher.
      */
     @JvmStatic
-    public val IO: CoroutineDispatcher = DefaultIoScheduler
+    public val IO: CoroutineDispatcher = DefaultIoScheduler.wrapVirtual(DISPATCHERS_IO_DISPATCH_VIRTUAL_THREADS)
 
     /**
      * Shuts down built-in dispatchers, such as [Default] and [IO],
@@ -90,6 +96,41 @@ public actual object Dispatchers {
         // Also shuts down Dispatchers.IO
         DefaultScheduler.shutdown()
     }
+}
+
+private fun CoroutineDispatcher.wrapVirtual(prop: String): CoroutineDispatcher {
+    if (!System.getProperty(prop).equals("true", true)) return this
+    return VirtualThreadDispatcher(this)
+}
+
+private class VirtualThreadDispatcher(val delegate: CoroutineDispatcher) : CoroutineDispatcher(), Delay {
+    val threadFactory = initializeThreadFactory(delegate)
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        threadFactory.newThread(block).start()
+    }
+
+    override fun scheduleResumeAfterDelay(
+        timeMillis: Long,
+        continuation: CancellableContinuation<Unit>
+    ) {
+        (delegate as? Delay ?: DefaultExecutor).scheduleResumeAfterDelay(timeMillis, continuation)
+    }
+
+    private fun initializeThreadFactory(dispatcher: CoroutineDispatcher): ThreadFactory {
+        try {
+            val vtb = Class.forName("java.lang.ThreadBuilders\$VirtualThreadBuilder")
+            @Suppress("UNCHECKED_CAST")
+            val constructor = vtb.getDeclaredConstructor(Executor::class.java) as Constructor<out Thread.Builder.OfVirtual>
+            constructor.isAccessible = true
+            val instance = constructor.newInstance(dispatcher.asExecutor())
+            return instance.factory()
+        }
+        catch (e: Throwable) {
+            throw e
+        }
+    }
+
 }
 
 /**
