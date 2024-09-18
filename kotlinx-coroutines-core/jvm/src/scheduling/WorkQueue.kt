@@ -99,7 +99,9 @@ internal class WorkQueue {
          * nulling out the buffer wouldn't be possible.
          */
         while (buffer[nextIndex] != null) {
-            Thread.yield()
+            if (!Thread.currentThread().isVirtual) {
+                Thread.yield()
+            }
         }
         buffer.lazySet(nextIndex, task)
         producerIndex.incrementAndGet()
