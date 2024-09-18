@@ -68,7 +68,7 @@ public actual object Dispatchers {
      * during operations over IO dispatcher.
      */
     @JvmStatic
-    public val IO: CoroutineDispatcher = DefaultIoScheduler.wrapVirtual(DISPATCHERS_IO_DISPATCH_VIRTUAL_THREADS)
+    public val IO: CoroutineDispatcher = DefaultIoScheduler/*.wrapVirtual(DISPATCHERS_IO_DISPATCH_VIRTUAL_THREADS)*/
 
     /**
      * Shuts down built-in dispatchers, such as [Default] and [IO],
@@ -98,15 +98,23 @@ public actual object Dispatchers {
     }
 }
 
-private fun CoroutineDispatcher.wrapVirtual(prop: String): CoroutineDispatcher {
+private fun SchedulerCoroutineDispatcher.wrapVirtual(prop: String): CoroutineDispatcher {
     if (!System.getProperty(prop).equals("true", true)) return this
     return VirtualThreadDispatcher(this)
 }
 
-private class VirtualThreadDispatcher(val delegate: CoroutineDispatcher) : CoroutineDispatcher(), Delay {
-    val threadFactory = initializeThreadFactory(delegate)
+public val doTailDispatch: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
+
+private class VirtualThreadDispatcher(val delegate: SchedulerCoroutineDispatcher) : CoroutineDispatcher(), Delay {
+    val threadFactory = initializeThreadFactory(delegate.executor)
 
     override fun dispatch(context: CoroutineContext, block: Runnable) {
+        threadFactory.newThread(block).start()
+    }
+
+    @InternalCoroutinesApi
+    override fun dispatchYield(context: CoroutineContext, block: Runnable) {
+        doTailDispatch.set(true)
         threadFactory.newThread(block).start()
     }
 
@@ -117,18 +125,28 @@ private class VirtualThreadDispatcher(val delegate: CoroutineDispatcher) : Corou
         (delegate as? Delay ?: DefaultExecutor).scheduleResumeAfterDelay(timeMillis, continuation)
     }
 
-    private fun initializeThreadFactory(dispatcher: CoroutineDispatcher): ThreadFactory {
+    private fun initializeThreadFactory(executor: Executor): ThreadFactory {
         try {
             val vtb = Class.forName("java.lang.ThreadBuilders\$VirtualThreadBuilder")
             @Suppress("UNCHECKED_CAST")
             val constructor = vtb.getDeclaredConstructor(Executor::class.java) as Constructor<out Thread.Builder.OfVirtual>
             constructor.isAccessible = true
-            val instance = constructor.newInstance(dispatcher.asExecutor())
+            val instance = constructor.newInstance(VExecutor(executor as CoroutineScheduler))
             return instance.factory()
         }
         catch (e: Throwable) {
             throw e
         }
+    }
+
+}
+
+
+internal class VExecutor(internal val coroutineScheduler: CoroutineScheduler) : Executor {
+    override fun execute(command: Runnable) {
+        val tailDispatch = doTailDispatch.get()
+        doTailDispatch.set(false)
+        coroutineScheduler.dispatch(command, tailDispatch = tailDispatch)
     }
 
 }
