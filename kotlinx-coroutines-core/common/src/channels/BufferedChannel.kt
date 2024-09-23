@@ -683,7 +683,7 @@ internal open class BufferedChannel<E>(
             // If `receive()` decides to suspend, the corresponding
             // `suspend` function that creates a continuation is called.
             // The tail-call optimization is applied here.
-            onNoWaiterSuspend = { segm, i, r -> unwrapTyped(receiveOnNoWaiterSuspend(segm, i, r)) }
+            onNoWaiterSuspend = { segm, i, r -> receiveOnNoWaiterSuspend(segm, i, r) }
         )
 
     private suspend fun receiveOnNoWaiterSuspend(
@@ -706,8 +706,9 @@ internal open class BufferedChannel<E>(
             // not dispatched yet. In case `onUndeliveredElement` is
             // specified, we need to invoke it in the latter case.
             onElementRetrieved = { element ->
-                val onCancellation = onUndeliveredElement?.bindCancellationFun(unwrapTyped(element), cont.context)
-                cont.resume(element, onCancellation)
+                val unwrapped: E = unwrapTyped(element)
+                val onCancellation = onUndeliveredElement?.bindCancellationFun(unwrapped, cont.context)
+                cont.resume(unwrapped, onCancellation)
             },
             onClosed = { onClosedReceiveOnNoWaiterSuspend(cont) },
         )
@@ -737,7 +738,7 @@ internal open class BufferedChannel<E>(
             },
             onSuspend = { _, _, _ -> error("unexpected") },
             onClosed = { closed(closeCause) },
-            onNoWaiterSuspend = { segm, i, r -> unwrapTyped(receiveCatchingOnNoWaiterSuspend(segm, i, r)) }
+            onNoWaiterSuspend = { segm, i, r -> receiveCatchingOnNoWaiterSuspend(segm, i, r) }
         )
 
     private suspend fun receiveCatchingOnNoWaiterSuspend(
