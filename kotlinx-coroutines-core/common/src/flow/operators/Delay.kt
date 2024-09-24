@@ -209,10 +209,10 @@ private fun <T> Flow<T>.debounceInternal(timeoutMillisSelector: (T) -> Long): Fl
             var timeoutMillis = 0L // will be always computed when lastValue != null
             // Compute timeout for this value
             if (lastValue != null) {
-                timeoutMillis = timeoutMillisSelector(NULL.unbox(lastValue))
+                timeoutMillis = timeoutMillisSelector(NULL.unbox(unwrapInternal(lastValue)))
                 require(timeoutMillis >= 0L) { "Debounce timeout should not be negative" }
                 if (timeoutMillis == 0L) {
-                    emitInner(downstream, lastValue)
+                    downstream.emitInternal(lastValue)
                     lastValue = null // Consume the value
                 }
             }
@@ -223,28 +223,23 @@ private fun <T> Flow<T>.debounceInternal(timeoutMillisSelector: (T) -> Long): Fl
                 // Set timeout when lastValue exists and is not consumed yet
                 if (lastValue != null) {
                     onTimeout(timeoutMillis) {
-                        emitInner<T>(downstream, lastValue)
+                        downstream.emitInternal<T>(lastValue)
                         lastValue = null // Consume the value
                     }
                 }
                 values.onReceiveCatching { value ->
                     value
-                        .onSuccess { lastValue = it }
+                        .onSuccess { lastValue = wrapInternal(it) }
                         .onFailure {
                             it?.let { throw it }
                             // If closed normally, emit the latest value
-                            if (lastValue != null) emitInner<T>(downstream, lastValue)
+                            if (lastValue != null) downstream.emitInternal<T>(lastValue)
                             lastValue = DONE
                         }
                 }
             }
         }
     }
-
-// Shouldn't be inlined, the method is instrumented by the IDEA debugger agent
-private suspend fun <T> emitInner(downstream: FlowCollector<T>, value: Any?) {
-    downstream.emit(NULL.unbox(unwrapInternal(value)))
-}
 
 /**
  * Returns a flow that emits only the latest value emitted by the original flow during the given sampling [period][periodMillis].
@@ -283,7 +278,7 @@ public fun <T> Flow<T>.sample(periodMillis: Long): Flow<T> {
             select<Unit> {
                 values.onReceiveCatching { result ->
                     result
-                        .onSuccess { lastValue = it }
+                        .onSuccess { lastValue = wrapInternal(it) }
                         .onFailure {
                             it?.let { throw it }
                             ticker.cancel(ChildCancelledException())
@@ -295,7 +290,7 @@ public fun <T> Flow<T>.sample(periodMillis: Long): Flow<T> {
                 ticker.onReceive {
                     val value = lastValue ?: return@onReceive
                     lastValue = null // Consume the value
-                    emitInner(downstream, value)
+                    downstream.emitInternal(value)
                 }
             }
         }
